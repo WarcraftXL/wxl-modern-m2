@@ -17,6 +17,7 @@
 #include "Host.hpp"
 
 #include "../shared/Downport.hpp"
+#include "../shared/Md21.hpp"
 
 #include <cstdint>
 #include <cstring>
@@ -33,7 +34,8 @@
  */
 namespace
 {
-    namespace dp = wxl::scripts::modernm2::downport;
+    namespace dp  = wxl::scripts::modernm2::downport;
+    namespace m21 = wxl::scripts::modernm2::md21;
 
     /**
      * @brief Host Transform hook: reshapes a source M2 onto the client contract.
@@ -47,6 +49,20 @@ namespace
     {
         (void)name;
         const uint32_t size = static_cast<uint32_t>(raw.size());
+
+        if (m21::IsMd21(raw))
+        {
+            std::vector<uint8_t> md20;
+            if (!m21::Dechunk(raw, &wxl::host::ResolveFdid, md20)) return false;
+            const uint32_t orig = static_cast<uint32_t>(md20.size());
+            const uint32_t work = dp::WorkSize(md20.data(), orig);
+            md20.resize(work);
+            if (!dp::ProcessInPlace(md20.data(), orig, work)) return false;
+            m21::ZeroBoneLookup(md20.data(), static_cast<uint32_t>(md20.size()));
+            out = std::move(md20);
+            return true;
+        }
+
         if (!dp::IsConvertible(raw.data(), size)) return false;
 
         const uint32_t workSize = dp::WorkSize(raw.data(), size);
