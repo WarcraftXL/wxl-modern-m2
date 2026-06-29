@@ -40,10 +40,41 @@ namespace wxl::scripts::modernm2::md21
         // M2 header field offsets the de-chunk touches.
         constexpr uint32_t kHdrTextures   = 0x50; // M2Array: texture records
         constexpr uint32_t kHdrBoneCombos = 0x78; // M2Array: bone lookup table
+        constexpr uint32_t kHdrBones      = 0x2C; // M2Array: bone records
         // M2Texture record (0x10): type@0x00, flags@0x04, filename {count@0x08, offset@0x0C}.
         constexpr uint32_t kTexStride     = 0x10;
         constexpr uint32_t kTexNameCount  = 0x08;
         constexpr uint32_t kTexNameOffset = 0x0C;
+        // M2CompBone record (0x58): keyBoneId@0x00, flags@0x04, parentBone@0x08, ... A bone whose flags
+        // carry a billboard bit faces the camera; collapsing the lookup must not route geometry onto it.
+        constexpr uint32_t kBoneStride        = 0x58;
+        constexpr uint32_t kBoneFlags         = 0x04;
+        constexpr uint32_t kBoneBillboardMask = 0x78; // spherical (0x8) + cylindrical-lock (0x10/0x20/0x40)
+
+        /**
+         * @brief Reports whether any bone the lookup table references is a billboard bone.
+         * @param md20  MD20 image base.
+         * @param size  Image byte length.
+         * @return True if at least one boneCombos entry resolves to a bone with a billboard flag set.
+         */
+        bool LookupReferencesBillboard(const uint8_t* md20, uint32_t size)
+        {
+            const uint32_t comboCount = Rd32(md20 + kHdrBoneCombos);
+            const uint32_t comboOfs   = Rd32(md20 + kHdrBoneCombos + 4);
+            const uint32_t boneCount  = Rd32(md20 + kHdrBones);
+            const uint32_t boneOfs    = Rd32(md20 + kHdrBones + 4);
+            for (uint32_t i = 0; i < comboCount; ++i)
+            {
+                if (comboOfs + i * 2 + 2 > size) break;
+                const uint16_t bone = Rd16(md20 + comboOfs + i * 2);
+                if (bone >= boneCount) continue;
+                const uint32_t rec = boneOfs + bone * kBoneStride;
+                if (rec + kBoneFlags + 4 > size) continue;
+                if (Rd32(md20 + rec + kBoneFlags) & kBoneBillboardMask)
+                    return true;
+            }
+            return false;
+        }
     }
 
     bool IsMd21(std::span<const uint8_t> in)
@@ -107,6 +138,14 @@ namespace wxl::scripts::modernm2::md21
 
     void ZeroBoneLookup(uint8_t* md20, uint32_t size)
     {
+        // Zeroing routes every vertex to global bone 0, which the shadow-swing fix assumes is a static
+        // root. When the lookup references a billboard bone that assumption fails: a model whose body
+        // sits on a static bone but whose glow sits on a spherical-billboard bone 0 would billboard
+        // wholesale (the whole lantern faces the camera, not just the glow). Leave such a model's lookup
+        // intact so each part keeps its own bone; pure-static doodads (the swing case) still collapse.
+        if (LookupReferencesBillboard(md20, size))
+            return;
+
         const uint32_t count = Rd32(md20 + kHdrBoneCombos);
         const uint32_t ofs   = Rd32(md20 + kHdrBoneCombos + 4);
         for (uint32_t i = 0; i < count; ++i)
