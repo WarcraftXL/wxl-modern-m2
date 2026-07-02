@@ -41,4 +41,24 @@ namespace wxl::scripts::modernm2::textures
      * @param appendOffset  Model-relative offset where the entry is written.
      */
     void SynthCoordCombos(wxl::structure::m2::M2Header* md, uint32_t appendOffset);
+
+    struct WeaponBladeFixResult
+    {
+        uint32_t toObjectSkin = 0;
+        uint32_t toHardcoded = 0;
+
+        uint32_t Total() const { return toObjectSkin + toHardcoded; }
+    };
+
+    /**
+     * @brief Rewrites source WEAPON_BLADE slots into a client-readable texture type.
+     *
+     * Some modern actor/item models incorrectly carry their primary skin texture as WEAPON_BLADE. If the slot
+     * has no concrete filename, OBJECT_SKIN keeps the old replaceable-texture behavior. If a TXID/filename was
+     * resolved, HARDCODED preserves that included texture instead of letting OBJECT_SKIN ignore it.
+     * @param md        Model header.
+     * @param fileSize  Model byte size for bounds checks.
+     * @return Counts of texture records rewritten.
+     */
+    WeaponBladeFixResult FixWeaponBladeTextureTypes(wxl::structure::m2::M2Header* md, uint32_t fileSize);
 }
