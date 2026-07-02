@@ -7,4 +7,8 @@ reshapes it into that native form before the loader ever sees it, so the client 
 always been one of its own. The same reshaping runs both inside the client and in the asset host, so a
 model is ready whichever side reads it first.
 
+External `.anim` files are handled here as well. Those sibling animation files are loaded after the main
+`.m2` parse, so the module gives them a smaller transform path that unwraps modern animation chunks and
+normalizes sequence metadata before the 3.3.5a loader consumes them.
+
 Part of [WarcraftXL](../../README.md). Released under the GNU General Public License v3.0.
