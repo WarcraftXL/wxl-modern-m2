@@ -18,6 +18,7 @@
 
 #include "../shared/Downport.hpp"
 #include "../shared/Md21.hpp"
+#include "../shared/Textures.hpp"
 
 #include "core/Logger.hpp"
 #include "structure/m2/M2Format.hpp"
@@ -41,6 +42,7 @@ namespace
 {
     namespace dp  = wxl::scripts::modernm2::downport;
     namespace m21 = wxl::scripts::modernm2::md21;
+    namespace tex = wxl::scripts::modernm2::textures;
     namespace fmt = wxl::structure::m2;
 
     constexpr uint32_t kBoneStride = 0x58;
@@ -61,6 +63,13 @@ namespace
     {
         return StartsWithCI(name, "creature\\") || StartsWithCI(name, "character\\") ||
                StartsWithCI(name, "item\\");
+    }
+
+    bool AllowsObjectSkinRemapPath(std::string_view name)
+    {
+        if (StartsWithCI(name, "creature\\") || StartsWithCI(name, "character\\")) return true;
+        if (!StartsWithCI(name, "item\\objectcomponents\\")) return false;
+        return !StartsWithCI(name, "item\\objectcomponents\\weapon\\");
     }
 
     uint32_t Rd32(const uint8_t* p)
@@ -198,6 +207,18 @@ namespace
         return true;
     }
 
+    void ApplyObjectSkinRemap(std::string_view name, std::vector<uint8_t>& model)
+    {
+        if (!AllowsObjectSkinRemapPath(name)) return;
+        if (model.size() < sizeof(fmt::M2Header)) return;
+
+        auto* md = reinterpret_cast<fmt::M2Header*>(model.data());
+        const auto patched = tex::FixWeaponBladeTextureTypes(md, static_cast<uint32_t>(model.size()));
+        if (patched.Total())
+            wxl::core::log::Printf("modern-m2: %.*s fixed WEAPON_BLADE textures objectSkin=%u hardcoded=%u",
+                                   int(name.size()), name.data(), patched.toObjectSkin, patched.toHardcoded);
+    }
+
     /**
      * @brief Host Transform hook: reshapes a source M2 onto the client contract.
      * @param name Asset name.
@@ -220,6 +241,7 @@ namespace
             if (!dp::ProcessInPlace(md20.data(), orig, work)) return false;
             if (!IsSkinnedActorPath(name))
                 m21::ZeroBoneLookup(md20.data(), static_cast<uint32_t>(md20.size()));
+            ApplyObjectSkinRemap(name, md20);
             ApplyHelmOffset(name, md20);
             out = std::move(md20);
             return true;
@@ -231,6 +253,7 @@ namespace
         out.resize(workSize);
         std::memcpy(out.data(), raw.data(), size);
         if (!dp::ProcessInPlace(out.data(), size, workSize)) { out.clear(); return false; }
+        ApplyObjectSkinRemap(name, out);
         ApplyHelmOffset(name, out);
         return true;
     }

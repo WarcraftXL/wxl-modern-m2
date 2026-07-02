@@ -43,4 +43,26 @@ namespace wxl::scripts::modernm2::textures
         md->textureUnitLookup.count  = 1;      // header+0x88
         md->textureUnitLookup.offset = appendOffset; // header+0x8C -> the appended entry
     }
+
+    WeaponBladeFixResult FixWeaponBladeTextureTypes(fmt::M2Header* md, uint32_t fileSize)
+    {
+        WeaponBladeFixResult result;
+        if (!md || md->magic != fmt::kMagicMD20) return result;
+        if (md->textures.offset > fileSize) return result;
+        if (md->textures.count > (fileSize - md->textures.offset) / sizeof(fmt::M2Texture)) return result;
+
+        auto* textures = reinterpret_cast<fmt::M2Texture*>(md->base() + md->textures.offset);
+        for (uint32_t i = 0; i < md->textures.count; ++i)
+        {
+            if (textures[i].type != fmt::kTexTypeWeaponBlade) continue;
+
+            const bool hasFilename = textures[i].filename.count != 0 && textures[i].filename.offset != 0;
+            textures[i].type = hasFilename ? fmt::kTexTypeHardcoded : fmt::kTexTypeObjectSkin;
+            if (hasFilename)
+                ++result.toHardcoded;
+            else
+                ++result.toObjectSkin;
+        }
+        return result;
+    }
 }
