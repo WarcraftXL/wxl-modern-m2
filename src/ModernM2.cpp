@@ -24,8 +24,10 @@
 #include "../shared/Downport.hpp"
 #include "../shared/Particles.hpp"
 #include "../shared/Ribbons.hpp"
+#include "../shared/Textures.hpp"
 #include "Skin.hpp"
 
+#include <cctype>
 #include <cstring>
 
 namespace wxl::scripts::modernm2
@@ -33,6 +35,43 @@ namespace wxl::scripts::modernm2
     namespace ev  = wxl::events;
     namespace m2  = wxl::game::m2;
     namespace fmt = wxl::structure::m2;
+    namespace tex = wxl::scripts::modernm2::textures;
+
+    namespace
+    {
+        bool StartsWithCI(const char* value, const char* prefix)
+        {
+            if (!value || !prefix) return false;
+            while (*prefix)
+            {
+                const char aRaw = (*value == '/') ? '\\' : *value;
+                const char bRaw = (*prefix == '/') ? '\\' : *prefix;
+                const auto a = static_cast<unsigned char>(aRaw);
+                const auto b = static_cast<unsigned char>(bRaw);
+                if (std::tolower(a) != std::tolower(b)) return false;
+                ++value;
+                ++prefix;
+            }
+            return true;
+        }
+
+        bool AllowsObjectSkinRemapPath(const char* path)
+        {
+            if (StartsWithCI(path, "creature\\") || StartsWithCI(path, "character\\")) return true;
+            if (!StartsWithCI(path, "item\\objectcomponents\\")) return false;
+            return !StartsWithCI(path, "item\\objectcomponents\\weapon\\");
+        }
+
+        void RemapWeaponBladeTextures(void* model, fmt::M2Header* md, uint32_t size)
+        {
+            if (!model || !md || !AllowsObjectSkinRemapPath(m2::PathStem(model))) return;
+
+            const auto patched = tex::FixWeaponBladeTextureTypes(md, size);
+            if (patched.Total())
+                WLOG_INFO("modern-m2: %s fixed WEAPON_BLADE textures objectSkin=%u hardcoded=%u",
+                          m2::PathStem(model), patched.toObjectSkin, patched.toHardcoded);
+        }
+    }
 
     /**
      * @brief Binds the module's handlers to the core M2 events.
@@ -73,6 +112,7 @@ namespace wxl::scripts::modernm2
         // the staging bit to hand the parser the clean native version, then register it.
         if (IsStagedVersion(md->version))
         {
+            RemapWeaponBladeTextures(a.model, md, size);
             md->version &= ~kStagedVersionBit;
             Remember(a.model);
             return;
@@ -103,7 +143,9 @@ namespace wxl::scripts::modernm2
 
         // ProcessInPlace staged the version; finalize it to the native value so the parser accepts it, then
         // register the model (no longer distinguishable by version at draw time) for the live-engine half.
-        static_cast<fmt::M2Header*>(image)->version &= ~kStagedVersionBit;
+        auto* imageMd = static_cast<fmt::M2Header*>(image);
+        RemapWeaponBladeTextures(a.model, imageMd, workSize);
+        imageMd->version &= ~kStagedVersionBit;
         Remember(a.model);
         WLOG_INFO("modern-m2: reshaped M2 to 264 (%u -> %u bytes)", size, workSize);
     }
