@@ -110,14 +110,17 @@ namespace wxl::scripts::modernm2::md21
 
         const uint32_t texCount = Rd32(out.data() + kHdrTextures);
         const uint32_t texOfs   = Rd32(out.data() + kHdrTextures + 4);
-        uint32_t hardcoded = 0, inlined = 0;
+        uint32_t namedSlots = 0, weaponBladeSlots = 0, inlined = 0;
         for (uint32_t i = 0; i < texCount; ++i)
         {
             const uint32_t rec = texOfs + i * kTexStride;
             if (rec + kTexStride > out.size()) break;
-            if (Rd32(out.data() + rec) != fmt::kTexTypeHardcoded) continue; // not a named texture
-            if (Rd32(out.data() + rec + kTexNameCount) != 0) continue;      // already has an inline name
-            ++hardcoded;
+            const uint32_t texType = Rd32(out.data() + rec);
+            if (texType != fmt::kTexTypeHardcoded && texType != fmt::kTexTypeWeaponBlade)
+                continue; // not a named or texture-aware replaceable slot
+            if (Rd32(out.data() + rec + kTexNameCount) != 0) continue; // already has an inline name
+            ++namedSlots;
+            if (texType == fmt::kTexTypeWeaponBlade) ++weaponBladeSlots;
 
             std::string path;
             if (i >= txid.size() || !txid[i] || !resolve || !resolve(txid[i], path) || path.empty())
@@ -131,8 +134,8 @@ namespace wxl::scripts::modernm2::md21
             ++inlined;
         }
 
-        wxl::core::log::Printf("modern-m2 md21: md20=%u textures=%u hardcoded=%u inlined=%u txid=%zu",
-            md20Size, texCount, hardcoded, inlined, txid.size());
+        wxl::core::log::Printf("modern-m2 md21: md20=%u textures=%u namedSlots=%u weaponBlade=%u inlined=%u txid=%zu",
+            md20Size, texCount, namedSlots, weaponBladeSlots, inlined, txid.size());
         return true;
     }
 
