@@ -16,18 +16,16 @@
 
 #include "Skin.hpp"
 
-#include "core/Logger.hpp"
-
-#include "Bones.hpp"
+#include "ExtensionApi.hpp"
 
 #include <cstdlib>
 #include <cstring>
 #include <vector>
 
-namespace wxl::scripts::modernm2::skin
+namespace wxl::modern::assets::m2::skin
 {
     namespace fmt = wxl::structure::m2;
-    namespace bn  = wxl::scripts::modernm2::bones;
+    namespace bn  = wxl::modern::assets::common::bones;
     using Skin     = wxl::game::m2::M2SkinProfile;
 
     namespace
@@ -85,6 +83,12 @@ namespace wxl::scripts::modernm2::skin
             return base;
         }
 
+        uint16_t NextLookup(uint16_t base, uint32_t count)
+        {
+            const uint32_t next = static_cast<uint32_t>(base) + 1u;
+            return next < count ? static_cast<uint16_t>(next) : base;
+        }
+
         /**
          * @brief Parks LOD submeshes and clamps drawn-submesh bone counts to the client ceiling.
          *
@@ -95,16 +99,27 @@ namespace wxl::scripts::modernm2::skin
          * @param skin      Live skin profile whose submeshes are adjusted in place.
          * @param badSubmesh Receives a per-submesh flag, set for zero-geometry sections.
          */
-        void FixSubmeshes(fmt::M2Header* md, Skin* skin, std::vector<uint8_t>& badSubmesh)
+        void FixSubmeshes(fmt::M2Header* md, Skin* skin, std::vector<uint8_t>& badSubmesh,
+                          bool extendedIndexStart)
         {
             badSubmesh.assign(skin->submeshCount, 0);
             for (uint32_t i = 0; i < skin->submeshCount; ++i)
             {
                 auto* s = &skin->submeshes[i];
-                if (s->level > 0)
+                if (s->level > 0 && !extendedIndexStart)
                 {
                     s->level = 0; s->vertexStart = 0; s->vertexCount = 0; s->indexStart = 0;
                     s->indexCount = 0; s->boneComboIndex = 0; s->centerBoneIndex = 0;
+                }
+                else if (s->indexCount != 0)
+                {
+                    const uint32_t start = bn::FullIndexStart(*s, extendedIndexStart);
+                    if (start > skin->indexCount || s->indexCount > skin->indexCount - start)
+                    {
+                        WLOG_WARN("modern-assets: submesh %u index window past skin indexCount, parking", i);
+                        s->level = 0; s->vertexStart = 0; s->vertexCount = 0; s->indexStart = 0;
+                        s->indexCount = 0; s->boneComboIndex = 0; s->centerBoneIndex = 0;
+                    }
                 }
 
                 if (s->indexCount == 0)
@@ -183,6 +198,7 @@ namespace wxl::scripts::modernm2::skin
          *         decode).
          */
         bool EnvSplit(uint16_t low, uint16_t shaderId, fmt::M2Batch primary, uint32_t nTransparencyLookup,
+                      uint32_t nTransformLookup,
                       std::vector<fmt::M2Batch>& out, std::vector<int16_t>& texUnitLookup,
                       std::vector<uint16_t>& blendOverride)
         {
@@ -210,6 +226,7 @@ namespace wxl::scripts::modernm2::skin
                 follower.textureComboIndex = static_cast<uint16_t>(primary.textureComboIndex + 1);
                 if (static_cast<uint32_t>(primary.textureWeightComboIndex) + 1 < nTransparencyLookup)
                     follower.textureWeightComboIndex = static_cast<uint16_t>(primary.textureWeightComboIndex + 1);
+                follower.textureTransformComboIndex = NextLookup(primary.textureTransformComboIndex, nTransformLookup);
                 int16_t t1 = (shaderId == 0x8001) ? -1 : 1;
                 uint16_t tc = LookupPair(texUnitLookup, 0, t1);
                 primary.textureCoordComboIndex  = tc;
@@ -241,7 +258,8 @@ namespace wxl::scripts::modernm2::skin
          * @param texUnitLookup       textureUnitLookup array to append into.
          * @param blendOverride       textureCombinerCombos array to append into.
          */
-        void DownConvertBatch(fmt::M2Batch b, uint32_t nTransparencyLookup, std::vector<fmt::M2Batch>& piece,
+        void DownConvertBatch(fmt::M2Batch b, uint32_t nTransparencyLookup, uint32_t nTransformLookup,
+                              std::vector<fmt::M2Batch>& piece,
                               std::vector<int16_t>& texUnitLookup, std::vector<uint16_t>& blendOverride)
         {
             uint16_t shaderId = b.shaderId;
@@ -265,7 +283,8 @@ namespace wxl::scripts::modernm2::skin
                 }
 
                 uint16_t low = shaderId & 0xFF;
-                if (EnvSplit(low, shaderId, b, nTransparencyLookup, piece, texUnitLookup, blendOverride))
+                if (EnvSplit(low, shaderId, b, nTransparencyLookup, nTransformLookup,
+                             piece, texUnitLookup, blendOverride))
                     return;
                 switch (low)
                 {
@@ -303,7 +322,7 @@ namespace wxl::scripts::modernm2::skin
         void FixTexUnits(Skin* skin, const std::vector<uint8_t>& badSubmesh,
                          const std::vector<bn::SplitRun>& splitMap, std::vector<fmt::M2Batch>& out,
                          std::vector<int16_t>& texUnitLookup, std::vector<uint16_t>& blendOverride,
-                         uint32_t nTransparencyLookup)
+                         uint32_t nTransparencyLookup, uint32_t nTransformLookup)
         {
             out.reserve(skin->batchCount);
             for (uint32_t i = 0; i < skin->batchCount; ++i)
@@ -314,7 +333,7 @@ namespace wxl::scripts::modernm2::skin
                 if (b.skinSectionIndex < splitMap.size()) run = splitMap[b.skinSectionIndex];
 
                 std::vector<fmt::M2Batch> piece;
-                DownConvertBatch(b, nTransparencyLookup, piece, texUnitLookup, blendOverride);
+                DownConvertBatch(b, nTransparencyLookup, nTransformLookup, piece, texUnitLookup, blendOverride);
 
                 for (uint16_t s = 0; s < run.count; ++s)
                 {
@@ -331,12 +350,47 @@ namespace wxl::scripts::modernm2::skin
             }
         }
 
+        void EnsureTextureTransformLookup(fmt::M2Header* md, const Skin* skin, const char* name)
+        {
+            if (!md || !skin) return;
+            if (!md->textureTransforms.count || md->textureTransformCombos.count) return;
+
+            uint32_t needed = md->textureTransforms.count;
+            for (uint32_t i = 0; i < skin->batchCount; ++i)
+            {
+                const auto& b = skin->batches[i];
+                const uint32_t base = b.textureTransformComboIndex;
+                if (base == 0xFFFFu) continue;
+                const uint32_t count = b.textureCount ? b.textureCount : 1u;
+                if (base <= 0xFFFFu - count && needed < base + count)
+                    needed = base + count;
+            }
+
+            auto* buf = static_cast<int16_t*>(std::malloc(needed * sizeof(int16_t)));
+            if (!buf) return;
+            for (uint32_t i = 0; i < needed; ++i)
+                buf[i] = i < md->textureTransforms.count ? static_cast<int16_t>(i) : static_cast<int16_t>(-1);
+
+            md->textureTransformCombos.count  = needed;
+            md->textureTransformCombos.offset = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(buf));
+            WLOG_INFO("modern-assets: '%s' synthesized %u texture-transform lookup entries", name, needed);
+        }
+
+        /// Material render-flag bits this client understands and that must survive the mask.
+        ///   0x00-0x1F : the classic 3.3.5 render flags (unlit, no-fog, two-sided, ...).
+        ///   0x40      : SHADOW-EXCLUDE. The stock caster collector (0x00834660) tests it and drops the
+        ///               batch outright -- this is how a modern tree's canopy or a glow plane is kept out
+        ///               of the shadow pass, exactly as Legion does via its skin shadow_batches list.
+        ///   0x80      : SHADOW-FORCE. Same collector: casts even when the blend mode would not qualify.
+        /// Masking 0x40/0x80 away (this used to be `& 0x1F`) silently re-admitted geometry the file
+        /// explicitly opts out of, and destroyed the only shadow-exclusion channel 3.3.5 natively reads.
+        constexpr uint16_t kMaterialFlagMask = 0x1Fu | 0x40u | 0x80u;
+
         /**
-         * @brief Clamps source material blend modes the client blend table cannot index to Add and strips
-         *        flags above bit 5.
+         * @brief Clamps source material blend modes the client blend table cannot index to Add, and drops
+         *        only the render-flag bits this client has no meaning for.
          *
-         * A blend mode above 6 is set to Add (4); render flags are masked to the low 5 bits. materials.offset
-         * is a raw pointer here.
+         * A blend mode above 6 is set to Add (4). materials.offset is a raw pointer here.
          * @param md Parsed model header whose material array is adjusted in place.
          */
         void FixRenderFlags(fmt::M2Header* md)
@@ -348,18 +402,20 @@ namespace wxl::scripts::modernm2::skin
                 uint16_t& flag  = mats[i * 2 + 0];
                 uint16_t& blend = mats[i * 2 + 1];
                 if (blend > 6) { blend = 4; flag |= 0x5; }
-                flag &= 0x1F;
+                flag &= kMaterialFlagMask;
             }
         }
     }
 
     /**
      * @brief Rebuilds the material / texunit contract on a downported model's live skin profile.
-     * @param md   Parsed model header (arrays are raw pointers by this point).
-     * @param skin Attached live skin profile.
-     * @param name Model path, used for logging.
+     * @param md        Parsed model header (arrays are raw pointers by this point).
+     * @param skin      Attached live skin profile.
+     * @param splitMap  Per-original-submesh sub-section run already applied to skin by the caller's bone
+     *                  split; empty when no split occurred.
+     * @param name      Model path, used for logging.
      */
-    void Rebuild(fmt::M2Header* md, Skin* skin, const char* name)
+    void Rebuild(fmt::M2Header* md, Skin* skin, const std::vector<bn::SplitRun>& splitMap, const char* name)
     {
         if (!md || !skin) return;
 
@@ -374,17 +430,16 @@ namespace wxl::scripts::modernm2::skin
         std::vector<uint16_t>     blendOverride;
         std::vector<fmt::M2Batch> batches;
         uint32_t nTransparencyLookup = md->textureWeightCombos.count;
+        EnsureTextureTransformLookup(md, skin, name);
+        uint32_t nTransformLookup = md->textureTransformCombos.count;
 
-        // Partition any submesh whose per-draw bone palette exceeds the client ceiling into <= 75-bone
-        // sub-sections; splitMap re-points each batch across its run. Empty on no split (every batch 1:1).
-        std::vector<bn::SplitSection> sections;
-        std::vector<bn::SplitRun>     splitMap;
-        uint32_t splitCount = 0;
-        if (bn::SplitSubmeshes(md, skin, sections, splitMap, splitCount, name) && splitCount > 0)
-            WLOG_INFO("modern-m2: '%s' bone-splitter produced %u extra sub-draw(s)", name, splitCount);
-
-        FixSubmeshes(md, skin, badSubmesh);
-        FixTexUnits(skin, badSubmesh, splitMap, batches, texUnitLookup, blendOverride, nTransparencyLookup);
+        // The bone split itself already ran unconditionally (ModernM2's OnSkinFinalize) before this is
+        // called; splitMap is that result. FixSubmeshes/FixTexUnits below operate on the already-split
+        // skin->submeshes and combine the split re-point with this source's shaderId decode.
+        const bool extendedIndexStart = bn::UsesExtendedIndexStart(name);
+        FixSubmeshes(md, skin, badSubmesh, extendedIndexStart);
+        FixTexUnits(skin, badSubmesh, splitMap, batches, texUnitLookup, blendOverride,
+                    nTransparencyLookup, nTransformLookup);
 
         // Commit the rebuilt batch array BEFORE native finalize sizes its parallel block from
         // skin->batchCount. The file-mapped arrays are never per-array freed, so the new buffer is leaked

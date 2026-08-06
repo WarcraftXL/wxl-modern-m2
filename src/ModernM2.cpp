@@ -1,4 +1,4 @@
-// wxl-modern-m2: module bring-up + binding the core events to the M2 themes.
+// m2: module bring-up + binding the core events to the M2 themes.
 // Copyright (C) 2026 WarcraftXL
 //
 // This program is free software: you can redistribute it and/or modify
@@ -16,174 +16,138 @@
 
 #include "ModernM2.hpp"
 
-#include "core/Logger.hpp"
-#include "game/m2/M2.hpp"
-#include "structure/m2/M2Format.hpp"
-
-#include "../shared/Contract.hpp"
-#include "../shared/Downport.hpp"
-#include "../shared/Particles.hpp"
-#include "../shared/Ribbons.hpp"
+#include "AssetRegistry.hpp"
+#include "BoneBudget.hpp"
+#include "ExtensionApi.hpp"
 #include "Skin.hpp"
 
-#include <cstring>
+#include "engine/events/Event.hpp"
+#include "game/M2.hpp"
+#include "engine/assets/shared/models/m2/M2Format.hpp"
+#include "engine/assets/shared/models/m2/Contract.hpp"
+#include "engine/assets/shared/models/m2/Particles.hpp"
+#include "engine/assets/shared/models/m2/Ribbons.hpp"
 
-namespace wxl::scripts::modernm2
+#include <windows.h>
+
+#include <string_view>
+#include <vector>
+
+namespace wxl::modern::assets::m2
 {
     namespace ev  = wxl::events;
     namespace m2  = wxl::game::m2;
     namespace fmt = wxl::structure::m2;
+    namespace bn  = wxl::modern::assets::common::bones;
 
-    /**
-     * @brief Binds the module's handlers to the core M2 events.
-     */
-    ModernM2::ModernM2()
+    namespace
     {
-        on<&ModernM2::OnModelLoadPre>(ev::Event::OnModelLoadPre);
-        on<&ModernM2::OnModelLoad>(ev::Event::OnModelLoad);
-        on<&ModernM2::OnSkinFinalize>(ev::Event::OnM2SkinFinalize);
-        on<&ModernM2::OnSetupBatchAlpha>(ev::Event::OnM2SetupBatchAlpha);
-        on<&ModernM2::OnRibbonDraw>(ev::Event::OnRibbonDraw);
+        common::AssetRegistry g_registry;
 
-        WLOG_INFO("wxl-modern-m2: loaded (in-memory modern M2 asset support)");
+        /**
+         * @brief Drops any registration left on this model pointer before the native reader fills it.
+         *
+         * The engine reuses model addresses: a pointer freed by one model can be handed straight back for
+         * the next. Clearing here means the registry only ever holds live models, and the native reader
+         * (RegisterNativeLoaded) is the one place that puts one back in.
+         */
+        void __cdecl OnModelLoadPre(void* /*user*/, const void* argsRaw)
+        {
+            const auto& a = *static_cast<const ev::ModelLoadArgs*>(argsRaw);
+            g_registry.Forget(a.model);
+        }
+
+        /**
+         * @brief Splits any over-budget submesh, then rebuilds the material / texunit contract for the
+         *        models the native MD21 reader filled.
+         *
+         * The bone-budget split (BoneBudget.hpp) is a hard client-engine constraint, not a format concern, so
+         * it runs for every model whatever its origin. The shaderId decode + textureUnitLookup synth after it
+         * is scoped to registered models only, because it assumes the modern packed shaderId encoding that
+         * the native reader leaves on the live skin -- a stock v264 model already carries a resolved contract
+         * and only needs the structural repoint when a split happened.
+         */
+        void __cdecl OnSkinFinalize(void* /*user*/, const void* argsRaw)
+        {
+            const auto& a = *static_cast<const ev::M2SkinFinalizeArgs*>(argsRaw);
+            auto* md = m2::Header(a.model);
+            auto* sk = m2::Skin(a.model);
+            if (!md || !sk) return;
+
+            std::vector<bn::SplitSection> sections;
+            std::vector<bn::SplitRun> splitMap;
+            uint32_t splitCount = 0;
+            const char* pathStem = m2::PathStem(a.model);
+            const bool split = bn::SplitSubmeshes(md, sk, sections, splitMap, splitCount,
+                                                  pathStem ? pathStem : "") && splitCount > 0;
+            if (split)
+                WLOG_INFO("modern-assets: bone-splitter produced %u extra sub-draw(s)", splitCount);
+
+            if (g_registry.Contains(a.model))
+                skin::Rebuild(md, sk, splitMap, pathStem ? pathStem : "");
+            else if (split)
+                bn::RepointBatchesAfterSplit(sk, splitMap);
+        }
+
+        /// Delegates the draw-time alpha-key fixup to the particles theme, flagged for reshaped models.
+        void __cdecl OnSetupBatchAlpha(void* /*user*/, const void* argsRaw)
+        {
+            const auto& a = *static_cast<const ev::M2SetupBatchAlphaArgs*>(argsRaw);
+            // Alpha-key batches are a small minority of the scene; test the blend mode before paying
+            // the registry lookup, which otherwise costs a shared-lock + hash find on EVERY batch of
+            // every visible model.
+            if (a.blendMode != particles::kBlendAlphaKey) return;
+            particles::OnSetupBatchAlpha(a, g_registry.Contains(a.model));
+        }
+
+        /// Delegates the ribbon draw fixup to the ribbons theme.
+        void __cdecl OnRibbonDrawHandler(void* /*user*/, const void* argsRaw)
+        {
+            const auto& a = *static_cast<const ev::RibbonDrawArgs*>(argsRaw);
+            ribbons::OnRibbonDraw(a);
+        }
     }
 
     /**
-     * @brief Reshapes the .m2 bytes in the model's load buffer onto the native version before the parser runs,
-     *        and registers the model for the live-engine half.
-     *
-     * The byte-transform may have already run on the host (the image arrives compacted with its inner version
-     * staged) or it runs here in process. Either way the model is finalized to the native version and
-     * registered for the skin rebuild at finalize and the draw-time fixups.
-     * @param a Model load arguments carrying the model pointer and load buffer.
+     * @brief Registers a model the native MD21 reader direct-filled into this module's registry
+     *        (kFlagHotReshaped: the packed modern shaderIds are present on the live skin, so the
+     *        finalize-time contract rebuild and the draw fixups must scope to it).
+     * @param model Runtime model pointer.
      */
-    void ModernM2::OnModelLoadPre(const ev::ModelLoadArgs& a)
+    void RegisterNativeLoaded(void* model)
     {
-        // A fresh model now occupies this pointer; drop any registration left from a prior model freed at
-        // the same address (only a successful path below re-registers it).
-        Forget(a.model);
-
-        void* buf = m2::FileBuffer(a.model);
-        const uint32_t size = m2::FileSize(a.model);
-        if (!buf || size < sizeof(fmt::M2Header)) return;
-        auto* md = static_cast<fmt::M2Header*>(buf);
-        if (md->magic != fmt::kMagicMD20) return;
-
-        // Host already compacted it: the records are on the client contract and the version is staged. Clear
-        // the staging bit to hand the parser the clean native version, then register it.
-        if (IsStagedVersion(md->version))
-        {
-            md->version &= ~kStagedVersionBit;
-            Remember(a.model);
-            return;
-        }
-
-        // Host off (or a file the host did not serve): reshape in process. Downport never allocates; the
-        // caller owns the buffer. Reshape within the load buffer when the image does not grow; otherwise
-        // allocate a replacement with the model allocator (so the destructor frees it), copy, reshape, swap.
-        if (!downport::IsConvertible(buf, size)) return;
-        downport::Inspect(buf, size);
-
-        const uint32_t workSize = downport::WorkSize(buf, size);
-        void* image = buf;
-        if (workSize == size)
-        {
-            if (!downport::ProcessInPlace(buf, size, size)) return;
-        }
+        if constexpr (wxl_m2::kEnabled)
+            g_registry.Remember(model, common::AssetRegistry::kFlagHotReshaped);
         else
-        {
-            void* out = m2::AllocBuffer(workSize, ".\\wxl-modern-m2");
-            if (!out) return;
-            std::memcpy(out, buf, size);
-            if (!downport::ProcessInPlace(out, size, workSize)) { m2::FreeBuffer(out); return; }
-            m2::ReplaceBuffer(a.model, out, workSize); // parser now reads the grown image
-            m2::FreeBuffer(buf);                        // release the original source bytes
-            image = out;
-        }
-
-        // ProcessInPlace staged the version; finalize it to the native value so the parser accepts it, then
-        // register the model (no longer distinguishable by version at draw time) for the live-engine half.
-        static_cast<fmt::M2Header*>(image)->version &= ~kStagedVersionBit;
-        Remember(a.model);
-        WLOG_INFO("modern-m2: reshaped M2 to 264 (%u -> %u bytes)", size, workSize);
+            (void)model;
     }
 
     /**
-     * @brief Parsed-model load hook.
-     * @param a Model load arguments.
-     */
-    void ModernM2::OnModelLoad(const ev::ModelLoadArgs& a)
-    {
-        (void)a; // parsed-model hook for fixups that need the parsed object
-    }
-
-    /**
-     * @brief Rebuilds the material / texunit contract before native finalize sizes its blocks, scoped to
-     *        models this module reshaped.
-     *
-     * The source skin's batches carry modern shaderIds and an empty header textureUnitLookup; the rebuild
-     * synthesizes the contract the client shader-id pass indexes. Scoped to reshaped models, which assume the
-     * source batch encoding.
-     * @param a Skin finalize arguments carrying the model pointer.
-     */
-    void ModernM2::OnSkinFinalize(const ev::M2SkinFinalizeArgs& a)
-    {
-        if (!WasReshaped(a.model)) return;
-        auto* md = m2::Header(a.model);
-        auto* sk = m2::Skin(a.model);
-        if (md && sk)
-            skin::Rebuild(md, sk, "");
-    }
-
-    /**
-     * @brief Delegates the draw-time alpha-key fixup to the particles theme, flagged for reshaped models.
-     * @param a Batch-alpha setup arguments.
-     */
-    void ModernM2::OnSetupBatchAlpha(const ev::M2SetupBatchAlphaArgs& a)
-    {
-        particles::OnSetupBatchAlpha(a, WasReshaped(a.model));
-    }
-
-    /**
-     * @brief Delegates the ribbon draw fixup to the ribbons theme.
-     * @param a Ribbon draw arguments.
-     */
-    void ModernM2::OnRibbonDraw(const ev::RibbonDrawArgs& a)
-    {
-        ribbons::OnRibbonDraw(a);
-    }
-
-    /**
-     * @brief Registers a model in the reshaped set.
+     * @brief Drops a native-reader registration (failed fill after registration).
      * @param model Runtime model pointer.
      */
-    void ModernM2::Remember(void* model)
+    void ForgetNativeLoaded(void* model)
     {
-        std::unique_lock<std::shared_mutex> lock(reshapedMutex_);
-        reshaped_.insert(model);
+        if constexpr (wxl_m2::kEnabled)
+            g_registry.Forget(model);
+        else
+            (void)model;
     }
+}
 
-    /**
-     * @brief Drops a model from the reshaped set.
-     * @param model Runtime model pointer.
-     */
-    void ModernM2::Forget(void* model)
+namespace wxl_m2
+{
+    bool InstallModernM2()
     {
-        std::unique_lock<std::shared_mutex> lock(reshapedMutex_);
-        reshaped_.erase(model);
-    }
+        namespace ev = wxl::events;
+        namespace m2 = wxl::modern::assets::m2;
 
-    /**
-     * @brief Queries whether a model is in the reshaped set.
-     * @param model Runtime model pointer.
-     * @return true if the model was reshaped by this module.
-     */
-    bool ModernM2::WasReshaped(void* model) const
-    {
-        std::shared_lock<std::shared_mutex> lock(reshapedMutex_);
-        return reshaped_.find(model) != reshaped_.end();
-    }
+        g_api->Subscribe(uint32_t(ev::Event::OnModelLoadPre), &m2::OnModelLoadPre, nullptr);
+        g_api->Subscribe(uint32_t(ev::Event::OnM2SkinFinalize), &m2::OnSkinFinalize, nullptr);
+        g_api->Subscribe(uint32_t(ev::Event::OnM2SetupBatchAlpha), &m2::OnSetupBatchAlpha, nullptr);
+        g_api->Subscribe(uint32_t(ev::Event::OnRibbonDraw), &m2::OnRibbonDrawHandler, nullptr);
 
-    // File-scope instance self-registers its handlers at DLL load via the EventScript ctor.
-    ModernM2 g_modernM2;
+        WLOG_INFO("modern-assets: m2 live-engine half loaded");
+        return true;
+    }
 }

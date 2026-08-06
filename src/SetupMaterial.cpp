@@ -1,0 +1,74 @@
+// CM2SceneRender per-batch alpha/material setup: publish OnM2SetupBatchAlpha after the native setter.
+// Copyright (C) 2026 WarcraftXL
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+#include "ExtensionApi.hpp"
+
+#include "engine/events/Event.hpp"
+
+#include "offsets/game/M2.hpp"
+
+#include <windows.h>
+
+#include <cstdint>
+
+namespace
+{
+    namespace ev = wxl::events;
+    namespace m2 = wxl::offsets::game::m2;
+
+    m2::M2_SetupBatchAlphaFn g_origSetupAlpha = nullptr;
+
+    /**
+     * @brief Detours per-batch alpha/material setup, emitting OnM2SetupBatchAlpha with the model and blend.
+     *
+     * Runs after the native setter picks the alpha-test reference from the blend mode, so a
+     * subscriber can re-push a different reference. The draw-context reads are guarded so a
+     * malformed context never faults the render thread.
+     * @param ctx  draw context.
+     */
+    void __fastcall hkSetupBatchAlpha(void* ctx)
+    {
+        g_origSetupAlpha(ctx);
+
+        void*    model = nullptr;
+        uint16_t blend = 0;
+        __try
+        {
+            auto* dc   = static_cast<m2::DrawContext*>(ctx);
+            void* inst = dc->instance;
+            void* mat  = dc->material;
+            if (inst) model = static_cast<m2::M2Instance*>(inst)->model;
+            if (mat)  blend = static_cast<m2::Material*>(mat)->blend;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) { model = nullptr; }
+
+        if (model)
+        {
+            ev::M2SetupBatchAlphaArgs a{ model, blend };
+            wxl_m2::g_api->Emit(uint32_t(ev::Event::OnM2SetupBatchAlpha), &a);
+        }
+    }
+}
+
+namespace wxl_m2
+{
+    bool InstallM2SetupBatchAlpha()
+    {
+        HookAttach("M2SetupBatchAlpha", m2::kSetupBatchAlpha,
+                  &hkSetupBatchAlpha, &g_origSetupAlpha);
+        return true;
+    }
+}

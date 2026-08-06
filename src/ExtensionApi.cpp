@@ -1,4 +1,4 @@
-// Compacts the source camera record onto the client camera stride.
+// wxl-m2: definitions for the extension-wide service table pointer and lazy cross-binary interfaces.
 // Copyright (C) 2026 WarcraftXL
 //
 // This program is free software: you can redistribute it and/or modify
@@ -14,21 +14,11 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-#pragma once
+#include "ExtensionApi.hpp"
 
-#include "structure/m2/M2Format.hpp"
-
-/**
- * @brief Compacts source cameras onto the client camera stride.
- *
- * The source camera drops the explicit fov float and appends a FoV animation track, so it is 16
- * bytes larger than the client camera. The track body is identical, so each record compacts in place.
- */
-namespace wxl::scripts::modernm2::cameras
+namespace wxl_m2
 {
-    /**
-     * @brief Compacts every source camera onto the client camera stride in place.
-     * @param md  Model header (pre-parse, offsets model-relative).
-     */
-    void Compact(wxl::structure::m2::M2Header* md);
+    const WXL_Api* g_api = nullptr;
+    const WXL_FdidApi* g_fdid = nullptr;
+    const WXL_M2ArenaApi* g_arena = nullptr;
 }
