@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include "common/ExtensionConfig.hpp"
 #include "wxl/FdidApi.h"
 #include "wxl/M2ArenaApi.h"
 #include "wxl/M2DrawApi.h"
@@ -25,11 +26,7 @@
 #include <windows.h>
 
 #include <cstdint>
-#include <cstdio>
 #include <cstdlib>
-#include <cstring>
-#include <string>
-#include <unordered_map>
 
 /// See wxl-adt's ExtensionApi.hpp for the reasoning behind every pattern here: the core hands this
 /// pointer to WXL_Load once and it lives for the process lifetime, so every detour installed later
@@ -84,6 +81,18 @@ namespace wxl_m2
                                  reinterpret_cast<void**>(original), priority);
     }
 
+    /**
+     * @brief Typed detour install over WXL_Api::HookAttachByName: resolves `pointName` ("Namespace.Name")
+     *        against the core's centralized HookPoints table instead of carrying a raw offset here.
+     */
+    template <class Fn>
+    inline int HookAttachByName(const char* pointName, Fn* detour, Fn** original,
+                                int priority = WXL_HOOK_DEFAULT_PRIORITY)
+    {
+        return g_api->HookAttachByName(pointName, reinterpret_cast<void*>(detour),
+                                       reinterpret_cast<void**>(original), priority);
+    }
+
     // Per-file installers, called from WXL_Load in Module.cpp.
     bool InstallM2CompatBones();       // BonePalette.cpp (gated)
     bool InstallEmitterBlend();        // EmitterBlend.cpp (gated)
@@ -97,60 +106,11 @@ namespace wxl_m2
     bool InstallM2Memory();            // Memory.cpp (gated)
     bool InstallModernM2();            // ModernM2.cpp (gated)
 
-    /// Env-var + this module's own config file (ex wxl::config::*, which reads WarcraftXL.cfg --
-    /// core-only, an extension has no such object file to link). Same "KEY=value", '#'/';' comment,
-    /// trimmed format as WarcraftXL.cfg; env var always wins, matching the core's own precedence.
-    inline bool ConfigTruthy(const char* raw, bool fallback)
-    {
-        if (!raw || !raw[0]) return fallback;
-        switch (raw[0])
-        {
-        case '0': case 'n': case 'N': case 'f': case 'F': return false;
-        default: return true;
-        }
-    }
-
-    inline const std::unordered_map<std::string, std::string>& ConfigFile()
-    {
-        static const std::unordered_map<std::string, std::string> entries = [] {
-            std::unordered_map<std::string, std::string> map;
-            FILE* f = nullptr;
-            if (fopen_s(&f, "Extensions\\wxl-m2\\wxl-m2.cfg", "rb") != 0 || !f) return map;
-            char line[512];
-            while (fgets(line, sizeof line, f))
-            {
-                char* text = line;
-                while (*text == ' ' || *text == '\t') ++text;
-                if (*text == '#' || *text == ';' || *text == '\0') continue;
-                char* eq = std::strchr(text, '=');
-                if (!eq) continue;
-                char* keyEnd = eq;
-                while (keyEnd > text && (keyEnd[-1] == ' ' || keyEnd[-1] == '\t')) --keyEnd;
-                char* value = eq + 1;
-                while (*value == ' ' || *value == '\t') ++value;
-                char* valueEnd = value + std::strlen(value);
-                while (valueEnd > value && (valueEnd[-1] == '\n' || valueEnd[-1] == '\r'
-                                         || valueEnd[-1] == ' '  || valueEnd[-1] == '\t')) --valueEnd;
-                if (keyEnd > text)
-                    map.emplace(std::string(text, keyEnd), std::string(value, valueEnd));
-            }
-            fclose(f);
-            return map;
-        }();
-        return entries;
-    }
+    inline bool ConfigTruthy(const char* raw, bool fallback) { return wxl::ext::config::Truthy(raw, fallback); }
 
     inline bool ConfigRaw(const char* name, char* buf, size_t cap)
     {
-        if (!name || !buf || !cap) return false;
-        size_t written = 0;
-        if (getenv_s(&written, buf, cap, name) == 0 && written > 0) return true;
-
-        const auto& cfg = ConfigFile();
-        const auto it = cfg.find(name);
-        if (it == cfg.end() || it->second.empty() || it->second.size() + 1 > cap) return false;
-        std::memcpy(buf, it->second.c_str(), it->second.size() + 1);
-        return true;
+        return wxl::ext::config::Raw(name, buf, cap, "Extensions\\wxl-m2\\wxl-m2.cfg");
     }
 
     /// Feature toggle matching ex wxl::config::Flag: an env var (falsy value disables) plus a

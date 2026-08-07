@@ -90,10 +90,11 @@ namespace
     {
         const uint32_t result = g_origInitializeLoaded(model, edx);
 
-        const auto* shared = Read<const uint8_t*>(model, off::kOffInstShared);
+        const auto* shared = reinterpret_cast<const uint8_t*>(static_cast<off::M2Instance*>(model)->model);
         auto* const* emitters = Read<void* const*>(model, off::kOffInstEmitterArray);
         if (!shared || !emitters) return result;
-        const auto* header = Read<const wxl::structure::m2::M2Header*>(shared, off::kOffModelHeader);
+        const auto* header = reinterpret_cast<const wxl::structure::m2::M2Header*>(
+            reinterpret_cast<const off::M2Model*>(shared)->header);
         if (!header) return result;
 
         const uint32_t count = header->particleEmitters.count;
@@ -107,8 +108,7 @@ namespace wxl_m2
 {
     bool InstallEmitterBlend()
     {
-        if (!HookAttach("M2InitializeLoaded", off::kInitializeLoaded, &hkInitializeLoaded,
-                        &g_origInitializeLoaded))
+        if (!HookAttachByName("M2.InitializeLoaded", &hkInitializeLoaded, &g_origInitializeLoaded))
             return false;
         WLOG_INFO("m2native-particles: emitter blend modes past the stock map resolved natively");
         return true;

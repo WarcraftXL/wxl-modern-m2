@@ -50,7 +50,7 @@ namespace
             auto* dc   = static_cast<m2::DrawContext*>(ctx);
             void* inst = dc->instance;
             void* mat  = dc->material;
-            if (inst) model = static_cast<m2::M2Instance*>(inst)->model;
+            if (inst) model = reinterpret_cast<void*>(static_cast<m2::M2Instance*>(inst)->model);
             if (mat)  blend = static_cast<m2::Material*>(mat)->blend;
         }
         __except (EXCEPTION_EXECUTE_HANDLER) { model = nullptr; }
@@ -67,8 +67,7 @@ namespace wxl_m2
 {
     bool InstallM2SetupBatchAlpha()
     {
-        HookAttach("M2SetupBatchAlpha", m2::kSetupBatchAlpha,
-                  &hkSetupBatchAlpha, &g_origSetupAlpha);
+        HookAttachByName("M2.SetupMaterial", &hkSetupBatchAlpha, &g_origSetupAlpha);
         return true;
     }
 }

@@ -155,12 +155,8 @@ namespace wxl_m2
 {
     bool InstallM2SceneHitTestSort()
     {
-        // thiscall target hooked through a fastcall+edx trampoline: the detour type cannot match the
-        // native typedef, so the untyped install primitive is required here.
-        HookAttach("M2SceneTriangleHitTest", m2::kSceneTriangleHitTest,
-                  &hkSceneTriangleHitTest, &g_origSceneTriangleHitTest);
-        HookAttach("M2SortOpaqueGeoBatches", m2::kSortOpaqueGeoBatches,
-                  &hkSortOpaqueGeoBatches, &g_origSortOpaqueGeoBatches);
+        HookAttachByName("M2.SceneTriangleHitTest", &hkSceneTriangleHitTest, &g_origSceneTriangleHitTest);
+        HookAttachByName("M2.SortOpaqueGeoBatches", &hkSortOpaqueGeoBatches, &g_origSortOpaqueGeoBatches);
         return true;
     }
 }

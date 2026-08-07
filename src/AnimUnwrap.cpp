@@ -54,7 +54,7 @@ namespace
         auto* n = static_cast<off::LoadNode*>(node);
         if (!n || !n->record) return;
         auto* record = static_cast<off::IoRecord*>(n->record);
-        auto* bytes  = static_cast<uint8_t*>(record->buffer);
+        auto* bytes  = reinterpret_cast<uint8_t*>(record->buffer);
         if (!bytes || record->size < kChunkHeaderBytes) return;
         if (wxl::runtime::m2native::detail::Rd32(bytes) != fmt::kMagicAFM2) return;
 
@@ -86,8 +86,7 @@ namespace wxl_m2
 {
     bool InstallAnimUnwrap()
     {
-        if (!HookAttach("M2AnimLoadComplete", off::kAnimLoadComplete,
-                        &hkAnimLoadComplete, &g_origAnimLoadComplete))
+        if (!HookAttachByName("M2.AnimLoadComplete", &hkAnimLoadComplete, &g_origAnimLoadComplete))
             return false;
         WLOG_INFO("m2native-anim: wrapped external animation files are unwrapped in place");
         return true;

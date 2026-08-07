@@ -109,7 +109,8 @@ namespace
         __try
         {
             auto* bytes = static_cast<uint8_t*>(model);
-            auto* skin = *reinterpret_cast<wxl::game::m2::M2SkinProfile**>(bytes + m2::kOffModelSkin);
+            auto* mdl = static_cast<m2::M2Model*>(model);
+            auto* skin = static_cast<wxl::game::m2::M2SkinProfile*>(mdl->skin);
             auto** effects = *reinterpret_cast<void***>(bytes + m2::kOffModelSubMeshCopy);
             if (skin && effects)
             {
@@ -126,7 +127,7 @@ namespace
                 }
             }
 
-            const char* source = reinterpret_cast<const char*>(bytes + m2::kOffModelPathStem);
+            const char* source = mdl->pathStem;
             size_t i = 0;
             for (; i + 1 < sizeof path && source[i]; ++i) path[i] = source[i];
             path[i] = '\0';
@@ -171,10 +172,9 @@ namespace wxl_m2
 {
     bool InstallM2CompatLoader()
     {
-        HookAttach("M2Init", m2::kInit, &hkM2Init, &g_origM2Init);
-        HookAttach("M2FinalizeSkin", m2::kFinalizeSkin, &hkFinalizeSkin, &g_origFinalizeSkin);
-        HookAttach("M2BuildBatchMaterial", m2::kBuildBatchMaterial,
-                  &hkBuildBatchMaterial, &g_origBuildBatchMaterial);
+        HookAttachByName("M2.Init", &hkM2Init, &g_origM2Init);
+        HookAttachByName("M2.FinalizeSkin", &hkFinalizeSkin, &g_origFinalizeSkin);
+        HookAttachByName("M2.BuildBatchMaterial", &hkBuildBatchMaterial, &g_origBuildBatchMaterial);
         return true;
     }
 }

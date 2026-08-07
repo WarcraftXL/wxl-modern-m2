@@ -162,8 +162,8 @@ namespace wxl_m2
 {
     bool InstallM2Memory()
     {
-        HookAttach("M2BufferAlloc", m2::kBufferAlloc, &hkM2BufferAlloc, &g_origM2BufferAlloc);
-        HookAttach("M2BufferFree", m2::kBufferFree, &hkM2BufferFree, &g_origM2BufferFree);
+        HookAttachByName("M2.BufferAlloc", &hkM2BufferAlloc, &g_origM2BufferAlloc);
+        HookAttachByName("M2.BufferFree", &hkM2BufferFree, &g_origM2BufferFree);
         return true;
     }
 }

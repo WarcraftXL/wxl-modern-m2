@@ -63,8 +63,8 @@ namespace
 
     void ProbeShadowDraw(void* instance, void* section)
     {
-        auto* inst = static_cast<uint8_t*>(instance);
-        auto* shared = *reinterpret_cast<uint8_t**>(inst + off::kOffInstModel);
+        auto* inst = static_cast<off::M2Instance*>(instance);
+        auto* shared = reinterpret_cast<uint8_t*>(inst->model);
         if (!shared) return;
 
         auto* sec = static_cast<fmt::M2SkinSection*>(section);
@@ -72,7 +72,8 @@ namespace
         // --- the value that actually selects the shadow vertex program ---
         const uint16_t inflDraw = sec->boneInfluences;
         const uint16_t gate = *reinterpret_cast<const uint16_t*>(shared + off::kOffSharedAnimGateCount);
-        const uint32_t ovr = *reinterpret_cast<const uint32_t*>(inst + off::kOffInstSectionOverride);
+        const uint32_t ovr = *reinterpret_cast<const uint32_t*>(
+            reinterpret_cast<const uint8_t*>(inst) + off::kOffInstSectionOverride);
 
         // --- which array is this section in: the CM2Shared+0x18C runtime copy, or somewhere else? ---
         auto* copyBase = *reinterpret_cast<uint8_t**>(shared + off::kOffModelSubmeshBuf);
@@ -85,19 +86,20 @@ namespace
         }
         // ...and what the LIVE skin says at that same index, which is what FixSubmeshes patched.
         uint16_t inflSkin = 0xFFFFu;
-        auto* skin = *reinterpret_cast<wxl::game::m2::M2SkinProfile**>(shared + off::kOffModelSkin);
+        auto* skin = static_cast<wxl::game::m2::M2SkinProfile*>(
+            reinterpret_cast<off::M2Model*>(shared)->skin);
         if (skin && skin->submeshes && secIdx >= 0 && static_cast<uint32_t>(secIdx) < skin->submeshCount)
             inflSkin = skin->submeshes[secIdx].boneInfluences;
 
         // --- palette freshness AND space, in one check ---
-        const uint32_t lastAnim = *reinterpret_cast<const uint32_t*>(inst + off::kOffInstLastAnimFrame);
+        const uint32_t lastAnim = inst->lastAnimFrame;
         uint32_t frame = 0xFFFFFFFFu;
-        if (auto* scene = *reinterpret_cast<uint8_t* const*>(inst + off::kOffInstScene))
-            frame = *reinterpret_cast<const uint32_t*>(scene + off::kOffSceneFrame);
+        if (auto* scene = reinterpret_cast<off::M2SceneClock*>(inst->scene))
+            frame = scene->frame;
         bool palMatchesRoot = true;
-        if (auto* pal = *reinterpret_cast<const float* const*>(inst + off::kOffInstBonePalette))
+        if (const auto* pal = reinterpret_cast<const float*>(inst->bonePalettePtr))
         {
-            const auto* root = reinterpret_cast<const float*>(inst + off::kOffInstViewRoot);
+            const float* root = inst->viewRoot;
             palMatchesRoot = (std::fabs(pal[12] - root[12]) + std::fabs(pal[13] - root[13]) +
                               std::fabs(pal[14] - root[14])) < 0.01f;
         }

@@ -329,8 +329,8 @@ namespace wxl_m2
 
         g_api->Subscribe(uint32_t(ev::Event::OnWorldRenderEnd), &OnWorldRenderEnd, nullptr);
 
-        HookAttach("M2DrawBatch", off::kDrawTriangleBatch, &hkDrawBatch, &g_origDrawBatch);
-        HookAttach("M2RibbonDraw", m2off::kRibbonDraw, &hkRibbonDraw, &g_origRibbonDraw);
+        HookAttachByName("M2.DrawBatch", &hkDrawBatch, &g_origDrawBatch);
+        HookAttachByName("M2.RibbonDraw", &hkRibbonDraw, &g_origRibbonDraw);
 
         g_api->PublishInterface("wxl.m2draw", WXL_M2DRAW_API_VERSION, &g_m2DrawApi);
 

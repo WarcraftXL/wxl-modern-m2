@@ -18,6 +18,7 @@
 #include "ShadowSpace.hpp"
 
 #include "engine/events/Event.hpp"
+#include "engine/assets/shared/models/m2/M2Format.hpp"
 
 #include "offsets/game/M2.hpp"
 
@@ -75,8 +76,7 @@ namespace
         __try
         {
             if (skinSection)
-                boneCount = *reinterpret_cast<const uint16_t*>(
-                    static_cast<const uint8_t*>(skinSection) + 0x0C);
+                boneCount = static_cast<const wxl::structure::m2::M2SkinSection*>(skinSection)->boneInfluences;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -91,13 +91,11 @@ namespace
                 char path[264] = "<unreadable>";
                 __try
                 {
-                    const auto* bytes = static_cast<const uint8_t*>(instance);
-                    const auto* model = bytes ? *reinterpret_cast<void* const*>(bytes + m2::kOffInstModel) : nullptr;
+                    const auto* inst = static_cast<const m2::M2Instance*>(instance);
+                    const auto* model = inst ? reinterpret_cast<const m2::M2Model*>(inst->model) : nullptr;
                     if (model)
                     {
-                        std::strncpy(path,
-                            reinterpret_cast<const char*>(model) + m2::kOffModelPathStem,
-                            sizeof(path) - 1);
+                        std::strncpy(path, model->pathStem, sizeof(path) - 1);
                         path[sizeof(path) - 1] = '\0';
                     }
                 }
@@ -126,10 +124,9 @@ namespace wxl_m2
 {
     bool InstallM2CompatBones()
     {
-        HookAttach("M2BuildBonePalette", m2::kBuildBonePalette,
-                  &hkBuildBonePalette, &g_origBuildBonePalette);
-        const bool shadowHooked = HookAttach("M2RenderBatchShadowMap", m2::kRenderBatchShadowMap,
-                                             &hkRenderBatchShadowMap, &g_origRenderBatchShadowMap);
+        HookAttachByName("M2.BuildBonePalette", &hkBuildBonePalette, &g_origBuildBonePalette);
+        const bool shadowHooked = HookAttachByName("M2.RenderBatchShadowMap",
+                                                    &hkRenderBatchShadowMap, &g_origRenderBatchShadowMap);
         if constexpr (kEnabled)
             wxl::runtime::m2shadow::Arm(shadowHooked);
         return true;

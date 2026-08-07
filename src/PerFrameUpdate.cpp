@@ -50,8 +50,7 @@ namespace wxl_m2
 {
     bool InstallM2PerFrameUpdate()
     {
-        HookAttach("M2PerFrameUpdate", m2::kM2PerFrameUpdate,
-                  &hkM2PerFrameUpdate, &g_origM2PerFrame);
+        HookAttachByName("M2.PerFrameUpdate", &hkM2PerFrameUpdate, &g_origM2PerFrame);
         return true;
     }
 }
