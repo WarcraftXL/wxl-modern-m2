@@ -1,4 +1,4 @@
-// CM2Model per-render-ctx per-frame update: publish OnM2PerFrameUpdate per visible M2 each frame.
+// Per-render-context per-frame model update: publish OnM2PerFrameUpdate per visible M2 each frame.
 // Copyright (C) 2026 WarcraftXL
 //
 // This program is free software: you can redistribute it and/or modify
@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-#include "ExtensionApi.hpp"
+#include "../ExtensionApi.hpp"
 
 #include "engine/events/Event.hpp"
 
@@ -42,11 +42,11 @@ namespace
     {
         g_origM2PerFrame(renderCtx, edx);
         ev::M2PerFrameUpdateArgs a{ renderCtx };
-        wxl_m2::g_api->Emit(uint32_t(ev::Event::OnM2PerFrameUpdate), &a);
+        wxl_modern_m2::g_api->Emit(uint32_t(ev::Event::OnM2PerFrameUpdate), &a);
     }
 }
 
-namespace wxl_m2
+namespace wxl_modern_m2
 {
     bool InstallM2PerFrameUpdate()
     {

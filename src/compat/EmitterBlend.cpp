@@ -29,7 +29,7 @@
 // 0 leave the emitter in identical states -- only the record can still tell them apart, and the
 // emitter's back-pointer to its own record is wired up during that same construction.
 
-#include "ExtensionApi.hpp"
+#include "../ExtensionApi.hpp"
 
 #include "engine/assets/shared/models/m2/M2Format.hpp"
 #include "offsets/engine/Gx.hpp"
@@ -104,7 +104,7 @@ namespace
     }
 }
 
-namespace wxl_m2
+namespace wxl_modern_m2
 {
     bool InstallEmitterBlend()
     {

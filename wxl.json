@@ -31,7 +31,7 @@
 
   "deploy": {
     "mode": "release",
-    "match": "*.zip"
+    "match": "*.dll"
   },
 
   "listing": {

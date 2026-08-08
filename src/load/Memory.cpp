@@ -21,7 +21,7 @@
 // a standalone VirtualAlloc; below the threshold, or with the whole thing disabled, defer to the
 // client's own allocator untouched.
 
-#include "ExtensionApi.hpp"
+#include "../ExtensionApi.hpp"
 
 #include "offsets/game/M2.hpp"
 
@@ -53,13 +53,13 @@ namespace
     bool LargeM2VirtualAllocEnabled()
     {
         static const bool enabled =
-            wxl_m2::ConfigFlag("WXL_M2_VIRTUAL_ALLOC", "WarcraftXL_m2_virtual_alloc.disable");
+            wxl_modern_m2::ConfigFlag("WXL_M2_VIRTUAL_ALLOC", "WarcraftXL_m2_virtual_alloc.disable");
         return enabled;
     }
 
     uint32_t VirtualM2AllocThreshold()
     {
-        static const uint32_t bytes = wxl_m2::ConfigBytesMbKb(
+        static const uint32_t bytes = wxl_modern_m2::ConfigBytesMbKb(
             "WXL_M2_VIRTUAL_ALLOC_THRESHOLD_MB", "WXL_M2_VIRTUAL_ALLOC_THRESHOLD_KB",
             kDefaultVirtualM2AllocThreshold, 64, 2048u * 1024u);
         return bytes;
@@ -107,7 +107,7 @@ namespace
 
         if (ours && !alloc.base)
         {
-            if (const WXL_M2ArenaApi* arena = wxl_m2::Arena())
+            if (const WXL_M2ArenaApi* arena = wxl_modern_m2::Arena())
                 arena->Free(alloc.arenaOffset, alloc.arenaSize);
             return;
         }
@@ -125,7 +125,7 @@ namespace
     {
         if (size >= VirtualM2AllocThreshold() && LargeM2VirtualAllocEnabled())
         {
-            if (const WXL_M2ArenaApi* arena = wxl_m2::Arena())
+            if (const WXL_M2ArenaApi* arena = wxl_modern_m2::Arena())
             {
                 uint32_t offset = 0, allocSize = 0;
                 if (void* ptr = arena->Alloc(size, &offset, &allocSize))
@@ -144,12 +144,12 @@ namespace
             {
                 WLOG_DEBUG("m2-memory: virtual buffer %u bytes (%s)", size, tag ? tag : "M2");
                 if (size >= 8u * 1024u * 1024u)
-                    if (const WXL_M2ArenaApi* arena = wxl_m2::Arena())
+                    if (const WXL_M2ArenaApi* arena = wxl_modern_m2::Arena())
                         arena->LogAddressSpace("m2-virtual");
                 return standalone;
             }
             if (size >= 8u * 1024u * 1024u)
-                if (const WXL_M2ArenaApi* arena = wxl_m2::Arena())
+                if (const WXL_M2ArenaApi* arena = wxl_modern_m2::Arena())
                     arena->LogAddressSpace("m2-virtual-failed");
             WLOG_WARN("m2-memory: VirtualAlloc failed for %u bytes, falling back to native allocator", size);
         }
@@ -158,7 +158,7 @@ namespace
     }
 }
 
-namespace wxl_m2
+namespace wxl_modern_m2
 {
     bool InstallM2Memory()
     {

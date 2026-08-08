@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-#include "ExtensionApi.hpp"
+#include "../ExtensionApi.hpp"
 #include "NativeLoad.hpp"
 
 #include "engine/events/Event.hpp"
@@ -40,9 +40,9 @@ namespace
     /**
      * @brief Detours model init, emitting OnModelLoadPre at entry and OnModelLoad after parsing.
      *
-     * When the native MD21 reader is compiled in (wxl_m2::kEnabled) and the resident buffer is a
-     * modern chunked container, the stock parser is NOT called: features/m2native direct-fills
-     * the CM2Shared runtime from the modern body and returns the parser's own result contract.
+     * When the native MD21 reader is compiled in (wxl_modern_m2::kEnabled) and the resident buffer is a
+     * modern chunked container, the stock parser is NOT called: the native reader direct-fills the
+     * client's own model runtime from the modern body and returns the parser's own result contract.
      * A stock MD20 model pays one magic compare and takes the untouched original.
      * @param model  runtime model receiving the parsed file (raw bytes at model+0x150, size at +0x16c).
      * @return the original model-init result (or the native fill's, for an MD21 container).
@@ -50,16 +50,16 @@ namespace
     int __fastcall hkM2Init(void* model)
     {
         ev::ModelLoadArgs pre{ model };
-        wxl_m2::g_api->Emit(uint32_t(ev::Event::OnModelLoadPre), &pre);
+        wxl_modern_m2::g_api->Emit(uint32_t(ev::Event::OnModelLoadPre), &pre);
 
         int r;
-        if (wxl_m2::kEnabled && wxl::runtime::m2native::IsModernContainer(model))
+        if (wxl_modern_m2::kEnabled && wxl::runtime::m2native::IsModernContainer(model))
             r = wxl::runtime::m2native::NativeLoad(model);
         else
             r = g_origM2Init(model);
 
         ev::ModelLoadArgs a{ model };
-        wxl_m2::g_api->Emit(uint32_t(ev::Event::OnModelLoad), &a);
+        wxl_modern_m2::g_api->Emit(uint32_t(ev::Event::OnModelLoad), &a);
         return r;
     }
 
@@ -95,10 +95,10 @@ namespace
     void __fastcall hkFinalizeSkin(void* model)
     {
         ev::M2SkinFinalizeArgs a{ model };
-        wxl_m2::g_api->Emit(uint32_t(ev::Event::OnM2SkinFinalize), &a);
+        wxl_modern_m2::g_api->Emit(uint32_t(ev::Event::OnM2SkinFinalize), &a);
         g_origFinalizeSkin(model);
 
-        // Native finalize stores one optional CShaderEffect pointer per skin batch at model+0x188.
+        // Native finalize stores one optional shader-effect pointer per skin batch at model+0x188.
         // Diagnose and clear values that are already invalid here; the sorter guard (HitTestSort.cpp)
         // covers keys that become stale later (for example across an effect-manager/device lifecycle
         // transition).
@@ -168,7 +168,7 @@ namespace
     }
 }
 
-namespace wxl_m2
+namespace wxl_modern_m2
 {
     bool InstallM2CompatLoader()
     {

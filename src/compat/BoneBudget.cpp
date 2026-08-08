@@ -17,7 +17,7 @@
 
 #include "BoneBudget.hpp"
 
-#include "ExtensionApi.hpp"
+#include "../ExtensionApi.hpp"
 
 #include "engine/assets/shared/common/Text.hpp"
 

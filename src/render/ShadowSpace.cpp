@@ -16,7 +16,7 @@
 
 #include "ShadowSpace.hpp"
 
-#include "ExtensionApi.hpp"
+#include "../ExtensionApi.hpp"
 #include "engine/assets/shared/models/m2/M2Format.hpp"
 #include "game/M2.hpp"
 #include "offsets/game/M2.hpp"
@@ -75,7 +75,7 @@ namespace
         const uint32_t ovr = *reinterpret_cast<const uint32_t*>(
             reinterpret_cast<const uint8_t*>(inst) + off::kOffInstSectionOverride);
 
-        // --- which array is this section in: the CM2Shared+0x18C runtime copy, or somewhere else? ---
+        // --- which array is this section in: the shared runtime's own +0x18C copy, or somewhere else? ---
         auto* copyBase = *reinterpret_cast<uint8_t**>(shared + off::kOffModelSubmeshBuf);
         int32_t secIdx = -1;
         if (copyBase)

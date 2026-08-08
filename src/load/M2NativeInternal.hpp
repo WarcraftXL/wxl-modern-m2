@@ -53,11 +53,11 @@ namespace wxl::runtime::m2native::detail
         kSkipLdv1      = 0x02,
         kSkipAfid      = 0x04,
         kSkipSkid      = 0x08,
-        kSkipPhysBone  = 0x10, // PFID / BFID (no 3.3.5 home, permanently dropped)
+        kSkipPhysBone  = 0x10, // PFID / BFID (no home in the client's own format, permanently dropped)
         kSkipOther     = 0x80, // any other auxiliary chunk (EXP2, PFDC, ...)
     };
 
-    constexpr uint32_t kMaxTxid = 128; // corpus max is 7 textures; hard cap for the POD copy
+    constexpr uint32_t kMaxTxid = 128; // observed max is 7 textures; hard cap for the POD copy
 
     /// Everything harvested from the container walk, POD so it lives inside the SEH frame.
     struct Scan
@@ -80,8 +80,8 @@ namespace wxl::runtime::m2native::detail
         uint32_t texUnresolved;
         uint32_t skipMask;
         uint32_t extSeqPending;
-        uint32_t shadowGateForced; // 1 when CM2Shared+0x198 had to be lifted off zero
-        uint32_t shadowGateAfter;  // CM2Shared+0x198 read back immediately after the write
+        uint32_t shadowGateForced; // 1 when the shared runtime's animate-gate count had to be lifted off zero
+        uint32_t shadowGateAfter;  // that same animate-gate count, read back immediately after the write
         NormalizeReport normalized; // records rewritten to the target shape, per kRecordNormalizers entry
         const char* fail; // static failure reason when ok == 0
     };

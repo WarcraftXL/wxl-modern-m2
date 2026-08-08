@@ -21,8 +21,8 @@
 /**
  * @brief Why a modern-M2 ground shadow rotates with the camera, measured at the draw that renders it.
  *
- * The shadow-map vertex program comes in three variants, selected by
- * CShaderEffect::SetDefaultShaders(section->boneInfluences) clamped to 0..2. Only the variants for
+ * The shadow-map vertex program comes in three variants, selected by the shader-effect selector
+ * (section->boneInfluences) clamped to 0..2. Only the variants for
  * boneInfluences >= 1 apply c14..c16 = inverse(cameraView) * lightView -- the rebase that cancels the
  * camera view carried by the c31 bone palette. The **boneInfluences == 0 variant goes straight from
  * the palette to the light projection**, so any section drawn through it is camera-locked by
@@ -31,10 +31,10 @@
  *
  * Modern skins do ship sections with boneInfluences == 0 (verified on disk: the ultratree's trunk).
  * Our live half is supposed to lift those to 1 at skin finalize (Skin.cpp, FixSubmeshes) BEFORE the
- * stock finalize memcpys the runtime section copy to CM2Shared+0x18C. This module checks that
- * guarantee where it actually matters -- at the draw -- and repairs it in place if it did not hold,
- * because several links in that chain (rebuild gating, hot-reshaped registry state, and the
- * per-instance override arrays at CM2Model+0x2D0 that the rebuild never touches) have never been
+ * stock finalize memcpys the runtime section copy into the shared runtime object. This module checks
+ * that guarantee where it actually matters -- at the draw -- and repairs it in place if it did not
+ * hold, because several links in that chain (rebuild gating, hot-reshaped registry state, and the
+ * per-instance override arrays at model+0x2D0 that the rebuild never touches) have never been
  * observed at runtime.
  *
  * The repair writes the RUNTIME section copy, never the model file.
@@ -47,7 +47,7 @@ namespace wxl::runtime::m2shadow
         uint32_t pairsLogged;      ///< distinct (model, section) pairs dumped to the log
         uint32_t influencesZero;   ///< draws whose section arrived with boneInfluences == 0
         uint32_t influencesFixed;  ///< of those, ones this module lifted to 1 in place
-        uint32_t overrideSections; ///< draws whose section came from the CM2Model+0x2D0 override arrays
+        uint32_t overrideSections; ///< draws whose section came from the model+0x2D0 override arrays
         uint32_t staleAnim;        ///< draws where the instance's last-animated frame != scene frame
         uint32_t paletteMismatch;  ///< draws where palette slot 0 != the per-frame view root
         uint32_t faults;           ///< SEH faults swallowed (the draw still ran untouched)
@@ -68,7 +68,7 @@ namespace wxl::runtime::m2shadow
      * Measures the four values that decide whether this draw can produce a stable shadow, and -- when
      * enabled -- lifts a zero boneInfluences to 1 so the draw takes a shader variant that applies the
      * camera-view rebase.
-     * @param instance  the CM2Model being drawn (ECX of the stock function).
+     * @param instance  the model instance being drawn (ECX of the stock function).
      * @param section   the M2SkinSection for this batch. Writable: it is a runtime copy.
      */
     void OnShadowBatch(void* instance, void* section);

@@ -1,4 +1,5 @@
-// Native modern-M2 reader: the 3.3.5 client READS a Legion MD21 container and direct-fills CM2Shared.
+// Native modern-M2 reader: reads a modern MD21 container directly and fills the client's own model
+// runtime with it.
 // Copyright (C) 2026 WarcraftXL
 //
 // This program is free software: you can redistribute it and/or modify
@@ -25,18 +26,18 @@
 //   Fill        In-place field deltas (M2Fixups), then record normalization (M2Normalize) which brings
 //               every source-era-wide record onto the one shape the rest of the pipeline steps, then our
 //               own offset->pointer walk (M2WalkOwned, driven by the record map in M2WalkLayout), then
-//               TXID name injection, then the stock CM2Shared::Initialize + stock tail.
+//               TXID name injection, then the stock shared-initialize step + stock tail.
 //   Live half   The model registers in the modern-M2 AssetRegistry (kFlagHotReshaped); the already-
 //               shipping live-engine half (skin-finalize contract rebuild, draw fixups) applies unchanged.
 //   Safety      The whole fill runs under SEH: malformed data becomes a logged failure, never a crash.
 
-#include "ExtensionApi.hpp"
+#include "../ExtensionApi.hpp"
 #include "NativeLoad.hpp"
 #include "M2NativeInternal.hpp"
 
 #include "engine/events/Event.hpp"
 #include "engine/assets/shared/models/m2/M2Format.hpp"
-#include "ModernM2.hpp"
+#include "../compat/ModernM2.hpp"
 #include "engine/assets/shared/models/m2/Contract.hpp"
 #include "game/Binding.hpp"
 #include "game/M2.hpp"
@@ -72,8 +73,8 @@ namespace
     std::atomic<uint32_t> g_statShadowGateForced{ 0 };
 
     /**
-     * @brief The full native load: demux, in-place deltas, stock walk, TXID injection, stock
-     *        CM2Shared::Initialize, stock tail. POD locals only (lives under the SEH guard).
+     * @brief The full native load: demux, in-place deltas, stock walk, TXID injection, the stock
+     *        shared-initialize step, stock tail. POD locals only (lives under the SEH guard).
      * @param model  runtime model whose buffer holds the raw MD21 bytes.
      * @param out    receives the outcome for stats / the OnM2NativeLoad event.
      */
@@ -160,20 +161,20 @@ namespace
         // fixups key off this registry.
         wxl::modern::assets::m2::RegisterNativeLoaded(model);
 
-        // --- stock CM2Shared::Initialize: skin select + name-based skin load + texture handles ---
+        // --- stock shared-initialize: skin select + name-based skin load + texture handles ---
         if (!wxl::game::Native<off::M2_SharedInitializeFn>(off::kSharedInitialize)(model))
         {
-            out.fail = "CM2Shared::Initialize failed (skin profile / texture array)";
+            out.fail = "shared initialize failed (skin profile / texture array)";
             return;
         }
 
-        // Shadow-path animate gate. Initialize has just tallied, at +0x198, how many bones carry flags &
-        // 0x2F8. Its only reader is CM2Model::AnimateSM (0x00831990), the SHADOW-path animate: with the
-        // count at zero it takes a fast path that never rebuilds the bone palette, so the palette still
-        // holds an older frame's view matrix while CShadowQuery::Render uploads c14..c16 from the CURRENT
-        // view -- the two stop cancelling and the shadow rotates with the camera. WotLK exporters bake
-        // 0x200 into practically every bone so stock content always takes the full path; a Legion/Midnight
-        // model ships every bone flag at 0x0 and would not. Forcing the count to 1 puts our models on the
+        // Shadow-path animate gate. Initialize has just tallied, at +0x198, how many bones carry a
+        // specific flag combination. The shadow-pass animate step reads that count: at zero it takes a
+        // fast path that never rebuilds the bone palette, so the palette still holds an older frame's
+        // view matrix while the shadow renderer uploads the current view -- the two stop cancelling and
+        // the shadow rotates with the camera. Stock content's exporter always bakes that flag into
+        // practically every bone, so it always takes the full path; a model exported by a newer toolchain
+        // can ship every bone flag empty and would not. Forcing the count to 1 puts our models on the
         // exact path stock content already takes. This writes the RUNTIME object, never the model bytes.
         auto* animGate = reinterpret_cast<uint16_t*>(static_cast<uint8_t*>(model) +
                                                      off::kOffSharedAnimGateCount);
@@ -186,8 +187,7 @@ namespace
         // later reset it" -- the probe sees 0 at the shadow draw, and only this distinguishes the two.
         out.shadowGateAfter = *animGate;
 
-        // --- stock tail (RE'd from CM2Shared__FinishLoading): the external-sequence table the .anim
-        // streamer indexes, then the loaded flag ---
+        // --- stock tail: the external-sequence table the .anim streamer indexes, then the loaded flag ---
         uint32_t extCount = 0;
         if (h->sequences.count && h->sequences.offset)
         {
@@ -222,11 +222,11 @@ namespace
     }
 }
 
-namespace wxl_m2
+namespace wxl_modern_m2
 {
     bool InstallM2Native()
     {
-        WLOG_INFO("m2native: native MD21 reader active (source versions %u-%u, direct CM2Shared fill)",
+        WLOG_INFO("m2native: native MD21 reader active (source versions %u-%u, direct native fill)",
                   wxl::modern::assets::m2::kSourceVersionMin,
                   wxl::modern::assets::m2::kSourceVersionMax);
         return true;
@@ -255,7 +255,7 @@ namespace wxl::runtime::m2native
         return s;
     }
 
-    bool Enabled() { return wxl_m2::kEnabled; }
+    bool Enabled() { return wxl_modern_m2::kEnabled; }
 
     bool IsModernContainer(void* model)
     {
@@ -319,7 +319,7 @@ namespace wxl::runtime::m2native
                       stem, out.extSeqPending);
 
         ev::M2NativeLoadArgs a{ model, out.version, out.texResolved, out.texUnresolved, out.skipMask };
-        wxl_m2::g_api->Emit(uint32_t(ev::Event::OnM2NativeLoad), &a);
+        wxl_modern_m2::g_api->Emit(uint32_t(ev::Event::OnM2NativeLoad), &a);
         return 1;
     }
 }

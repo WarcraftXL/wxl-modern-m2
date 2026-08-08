@@ -18,7 +18,7 @@
 // the injections run after it (offsets are raw pointers). Each is a field the source model states
 // differently from the target -- a value rewritten, never a value dropped.
 
-#include "ExtensionApi.hpp"
+#include "../ExtensionApi.hpp"
 #include "M2NativeInternal.hpp"
 
 #include <cstdint>
@@ -129,9 +129,9 @@ namespace wxl::runtime::m2native::detail
     /**
      * @brief Points each hardcoded (type 0) texture with no inline name at its TXID-resolved client path.
      *        Post-fixup, M2Texture.filename.offset is a raw pointer, so it can aim directly at the
-     *        resolver's process-lifetime cached string -- no buffer growth. The stock
-     *        CM2Shared::Initialize then TextureCreate()s exactly that path; an unresolved id keeps count
-     *        0 and falls back to the stock solid-white placeholder.
+     *        resolver's process-lifetime cached string -- no buffer growth. The stock shared-initialize
+     *        step then creates a texture for exactly that path; an unresolved id keeps count 0 and falls
+     *        back to the stock solid-white placeholder.
      */
     void InjectTxidNames(fmt::M2Header* h, const Scan& s, Outcome& out)
     {
@@ -143,7 +143,7 @@ namespace wxl::runtime::m2native::detail
             if (tex[i].filename.count >= 2 && tex[i].filename.offset) continue; // inline name kept
             const uint32_t fdid = i < s.txidCount ? s.txid[i] : 0;
             if (!fdid) continue;
-            const char* path = wxl_m2::ResolveTexture(fdid);
+            const char* path = wxl_modern_m2::ResolveTexture(fdid);
             if (!path)
             {
                 ++out.texUnresolved;

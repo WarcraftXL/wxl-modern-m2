@@ -27,7 +27,7 @@
 // into separate event / attachment / bone chunks instead of one, which is a different unwrap and has
 // no home while such models are refused at load.
 
-#include "ExtensionApi.hpp"
+#include "../ExtensionApi.hpp"
 #include "M2NativeInternal.hpp"
 
 #include "engine/assets/shared/models/m2/M2Format.hpp"
@@ -82,7 +82,7 @@ namespace
     }
 }
 
-namespace wxl_m2
+namespace wxl_modern_m2
 {
     bool InstallAnimUnwrap()
     {

@@ -16,7 +16,7 @@
 
 #include "Skin.hpp"
 
-#include "ExtensionApi.hpp"
+#include "../ExtensionApi.hpp"
 
 #include <cstdlib>
 #include <cstring>
@@ -377,13 +377,13 @@ namespace wxl::modern::assets::m2::skin
         }
 
         /// Material render-flag bits this client understands and that must survive the mask.
-        ///   0x00-0x1F : the classic 3.3.5 render flags (unlit, no-fog, two-sided, ...).
+        ///   0x00-0x1F : the classic render flags (unlit, no-fog, two-sided, ...).
         ///   0x40      : SHADOW-EXCLUDE. The stock caster collector (0x00834660) tests it and drops the
         ///               batch outright -- this is how a modern tree's canopy or a glow plane is kept out
-        ///               of the shadow pass, exactly as Legion does via its skin shadow_batches list.
+        ///               of the shadow pass, the same mechanism a modern skin's own shadow-batch list uses.
         ///   0x80      : SHADOW-FORCE. Same collector: casts even when the blend mode would not qualify.
-        /// Masking 0x40/0x80 away (this used to be `& 0x1F`) silently re-admitted geometry the file
-        /// explicitly opts out of, and destroyed the only shadow-exclusion channel 3.3.5 natively reads.
+        /// Masking 0x40/0x80 away would silently re-admit geometry the file explicitly opts out of, and
+        /// destroy the only shadow-exclusion channel the client natively reads.
         constexpr uint16_t kMaterialFlagMask = 0x1Fu | 0x40u | 0x80u;
 
         /**

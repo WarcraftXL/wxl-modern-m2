@@ -1,4 +1,4 @@
-// wxl-m2: definitions for the extension-wide service table pointer and lazy cross-binary interfaces.
+// wxl-modern-m2: definitions for the extension-wide service table pointer and lazy cross-binary interfaces.
 // Copyright (C) 2026 WarcraftXL
 //
 // This program is free software: you can redistribute it and/or modify
@@ -16,7 +16,7 @@
 
 #include "ExtensionApi.hpp"
 
-namespace wxl_m2
+namespace wxl_modern_m2
 {
     const WXL_Api* g_api = nullptr;
     const WXL_FdidApi* g_fdid = nullptr;

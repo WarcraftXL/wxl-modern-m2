@@ -18,7 +18,7 @@
 
 #include "AssetRegistry.hpp"
 #include "BoneBudget.hpp"
-#include "ExtensionApi.hpp"
+#include "../ExtensionApi.hpp"
 #include "Skin.hpp"
 
 #include "engine/events/Event.hpp"
@@ -116,7 +116,7 @@ namespace wxl::modern::assets::m2
      */
     void RegisterNativeLoaded(void* model)
     {
-        if constexpr (wxl_m2::kEnabled)
+        if constexpr (wxl_modern_m2::kEnabled)
             g_registry.Remember(model, common::AssetRegistry::kFlagHotReshaped);
         else
             (void)model;
@@ -128,14 +128,14 @@ namespace wxl::modern::assets::m2
      */
     void ForgetNativeLoaded(void* model)
     {
-        if constexpr (wxl_m2::kEnabled)
+        if constexpr (wxl_modern_m2::kEnabled)
             g_registry.Forget(model);
         else
             (void)model;
     }
 }
 
-namespace wxl_m2
+namespace wxl_modern_m2
 {
     bool InstallModernM2()
     {

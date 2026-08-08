@@ -15,14 +15,14 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-// wxl-m2 is the sole owner of the DrawIndexedPrimitive vtable slot: core's Render.cpp swaps
+// wxl-modern-m2 is the sole owner of the DrawIndexedPrimitive vtable slot: core's Render.cpp swaps
 // EndScene/Present/Reset but deliberately leaves this one alone (see its own top comment), and any
 // other extension that needs to bracket one native draw (wxl-wmo's four-layer material) goes through
 // the one-shot interceptor published here as "wxl.m2draw" (include/wxl/M2DrawApi.h) instead of
 // touching the vtable itself. The swap is re-applied on the OnWorldRenderEnd cadence core already uses
 // for its own three slots, so a device recreate (not a Reset -- the vtable survives that) is covered.
 
-#include "ExtensionApi.hpp"
+#include "../ExtensionApi.hpp"
 
 #include "common/Mem.hpp"
 #include "engine/events/Event.hpp"
@@ -82,7 +82,7 @@ namespace
     /**
      * @brief Re-expands modern skin section index starts before the D3D draw.
      *
-     * The 3.3.5 M2 draw path truncates M2SkinSection::indexStart to 16 bits when passing StartIndex to
+     * The client's M2 draw path truncates M2SkinSection::indexStart to 16 bits when passing StartIndex to
      * DrawIndexedPrimitive. Retail character and equipment skins use section.level as the high 16 bits of
      * the index window.
      * By the time DIP is called, drawCtx+0x90 points at the copied M2SkinSection for this batch, so the vtable
@@ -223,7 +223,7 @@ namespace
 
                 bool useMulti = false;
                 ev::RibbonDrawArgs a{ emitter, layers, &useMulti };
-                wxl_m2::g_api->Emit(uint32_t(ev::Event::OnRibbonDraw), &a);
+                wxl_modern_m2::g_api->Emit(uint32_t(ev::Event::OnRibbonDraw), &a);
 
                 if (useMulti && layers >= 3)
                 {
@@ -273,7 +273,7 @@ namespace
         {
             g_inM2Emit = true;
             ev::M2BatchDrawArgs a{ dev, g_curModel, pt, bv, mi, nv, drawStartIndex, pc };
-            wxl_m2::g_api->Emit(uint32_t(ev::Event::OnM2BatchDraw), &a);
+            wxl_modern_m2::g_api->Emit(uint32_t(ev::Event::OnM2BatchDraw), &a);
             g_inM2Emit = false;
         }
         return r;
@@ -309,7 +309,7 @@ namespace
 
     /// Re-applies the DIP swap on the same per-frame cadence core's own Render.cpp uses for its three
     /// slots (OnWorldRenderEnd fires from hkWorldFinalize, right after core's own EnsureDeviceHooks) --
-    /// so a device recreate is covered without wxl-m2 needing its own world-boundary hook.
+    /// so a device recreate is covered without wxl-modern-m2 needing its own world-boundary hook.
     void __cdecl OnWorldRenderEnd(void* /*user*/, const void* argsRaw)
     {
         const auto* a = static_cast<const ev::WorldRenderEndArgs*>(argsRaw);
@@ -318,7 +318,7 @@ namespace
     }
 }
 
-namespace wxl_m2
+namespace wxl_modern_m2
 {
     bool InstallM2Draw()
     {

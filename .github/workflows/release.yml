@@ -54,9 +54,18 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Copy-Item "core/build/Release/$env:EXT_NAME.dll" -Destination "dist/$env:EXT_NAME.dll"
 
+      - name: Read the version out of the manifest
+        id: v
+        shell: pwsh
+        run: |
+          $v = (Get-Content ext/wxl.json -Raw | ConvertFrom-Json).extension.version
+          if (-not $v) { throw "wxl.json carries no extension.version" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+
       - name: Publish Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ github.run_number }}
-          name: Build ${{ github.run_number }} (${{ github.sha }})
+          tag_name: v${{ steps.v.outputs.version }}
+          name: ${{ env.EXT_NAME }} ${{ steps.v.outputs.version }}
+          body: Built from ${{ github.sha }}
           files: dist/${{ env.EXT_NAME }}.dll

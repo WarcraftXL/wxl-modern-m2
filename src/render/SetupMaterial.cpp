@@ -1,4 +1,4 @@
-// CM2SceneRender per-batch alpha/material setup: publish OnM2SetupBatchAlpha after the native setter.
+// The scene renderer's per-batch alpha/material setup: publish OnM2SetupBatchAlpha after the native setter.
 // Copyright (C) 2026 WarcraftXL
 //
 // This program is free software: you can redistribute it and/or modify
@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-#include "ExtensionApi.hpp"
+#include "../ExtensionApi.hpp"
 
 #include "engine/events/Event.hpp"
 
@@ -58,12 +58,12 @@ namespace
         if (model)
         {
             ev::M2SetupBatchAlphaArgs a{ model, blend };
-            wxl_m2::g_api->Emit(uint32_t(ev::Event::OnM2SetupBatchAlpha), &a);
+            wxl_modern_m2::g_api->Emit(uint32_t(ev::Event::OnM2SetupBatchAlpha), &a);
         }
     }
 }
 
-namespace wxl_m2
+namespace wxl_modern_m2
 {
     bool InstallM2SetupBatchAlpha()
     {

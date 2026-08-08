@@ -1,4 +1,4 @@
-// CM2Scene hit-test / opaque-sort SEH guards: quarantine stale scene reads without dropping geometry.
+// Scene hit-test / opaque-sort SEH guards: quarantine stale scene reads without dropping geometry.
 // Copyright (C) 2026 WarcraftXL
 //
 // This program is free software: you can redistribute it and/or modify
@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-#include "ExtensionApi.hpp"
+#include "../ExtensionApi.hpp"
 
 #include "offsets/game/M2.hpp"
 
@@ -36,7 +36,7 @@ namespace
      * @brief Contains a stale M2 collision-buffer read after disconnect/reconnect world teardown.
      *
      * Returning the caller's current hit is the native loop's no-new-triangle result. Keeping the guard at
-     * this leaf lets CM2Scene's outer geometry/collision code finish its cleanup and matrix restoration.
+     * this leaf lets the scene's outer geometry/collision code finish its cleanup and matrix restoration.
      */
     int __fastcall hkSceneTriangleHitTest(
         void* scratch, void* /*edx*/, uint16_t* indexBegin, uint16_t* indexEnd, int vertexBase,
@@ -57,9 +57,9 @@ namespace
     }
 
     /**
-     * @brief Probes the optional shader-effect sort key carried by one 0x44-byte CM2 scene element.
+     * @brief Probes the optional shader-effect sort key carried by one 0x44-byte scene element.
      *
-     * CM2Scene::SortOpaqueGeoBatches reads two effect-owned arrays through element+0x30 using the
+     * The scene's opaque-batch sort reads two effect-owned arrays through element+0x30 using the
      * vertex/pixel shader indices at +0x34/+0x38. The effect pointer is not needed by DrawBatch itself;
      * it only refines ordering. A stale key can therefore be cleared without dropping the geometry.
      */
@@ -151,7 +151,7 @@ namespace
     }
 }
 
-namespace wxl_m2
+namespace wxl_modern_m2
 {
     bool InstallM2SceneHitTestSort()
     {

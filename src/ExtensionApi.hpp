@@ -1,4 +1,4 @@
-// wxl-m2: the extension-wide service table pointer and hook-install convenience, shared by every
+// wxl-modern-m2: the extension-wide service table pointer and hook-install convenience, shared by every
 // translation unit in this DLL.
 // Copyright (C) 2026 WarcraftXL
 //
@@ -31,16 +31,16 @@
 /// See wxl-adt's ExtensionApi.hpp for the reasoning behind every pattern here: the core hands this
 /// pointer to WXL_Load once and it lives for the process lifetime, so every detour installed later
 /// reaches it through here rather than threading an `api` parameter through the call chain.
-namespace wxl_m2
+namespace wxl_modern_m2
 {
     extern const WXL_Api* g_api;
 
     /// True builds the whole native M2 pipeline in; false is the single point that would leave the
-    /// client on its stock 3.3.5 M2 reader (ex wxl::features::modernM2Support).
+    /// client on its stock M2 reader.
     inline constexpr bool kEnabled = true;
 
     // --- wxl-db2's FileDataID resolver, fetched lazily (extensions load alphabetically; wxl-db2
-    // loads before wxl-m2, so this always resolves once anything actually asks for a path). ----------
+    // loads before wxl-modern-m2, so this always resolves once anything actually asks for a path). ----------
     extern const WXL_FdidApi* g_fdid;
 
     inline const WXL_FdidApi* Fdid()
@@ -57,7 +57,7 @@ namespace wxl_m2
     }
 
     // --- the core-owned large-M2 arena, published (Boot phase, before any extension loads) as
-    // "wxl.m2arena" -- always present by the time wxl-m2's own WXL_Load runs, but fetched through the
+    // "wxl.m2arena" -- always present by the time wxl-modern-m2's own WXL_Load runs, but fetched through the
     // same lazy accessor as every other cross-binary service for one uniform pattern. -----------------
     extern const WXL_M2ArenaApi* g_arena;
 
@@ -110,11 +110,11 @@ namespace wxl_m2
 
     inline bool ConfigRaw(const char* name, char* buf, size_t cap)
     {
-        return wxl::ext::config::Raw(name, buf, cap, "Extensions\\wxl-m2\\wxl-m2.cfg");
+        return wxl::ext::config::Raw(name, buf, cap, "Extensions\\wxl-modern-m2\\wxl-modern-m2.cfg");
     }
 
-    /// Feature toggle matching ex wxl::config::Flag: an env var (falsy value disables) plus a
-    /// .disable sentinel FILE (checked directly, independent of the .cfg mechanism), default ON.
+    /// Feature toggle: an env var (falsy value disables) plus a .disable sentinel FILE (checked
+    /// directly, independent of the .cfg mechanism), default ON.
     inline bool ConfigFlag(const char* envName, const char* disableFile)
     {
         char value[16] = {};
@@ -142,8 +142,8 @@ namespace wxl_m2
         return static_cast<uint32_t>(ConfigU64(name, fallback, minValue, maxValue));
     }
 
-    /// ex wxl::config::BytesMbKb: an MB env var, then a KB one, then a default; a candidate outside
-    /// [minKb, maxKb] is rejected and the next source tried.
+    /// Resolves a byte-count setting: an MB env var, then a KB one, then a default; a candidate
+    /// outside [minKb, maxKb] is rejected and the next source tried.
     inline uint32_t ConfigBytesMbKb(const char* envMb, const char* envKb, uint32_t defBytes,
                                     uint32_t minKb, uint32_t maxKb)
     {
@@ -170,8 +170,8 @@ namespace wxl_m2
 // common/Log.hpp's WLOG_* macros need common/Log.cpp linked in, which is core/host/patcher-only (see
 // its own doc comment) -- an extension has no such object file, so these route the same call-site
 // syntax through WXL_Api::Log instead.
-#define WLOG_TRACE(...) ::wxl_m2::g_api->Log(WXL_LOG_TRACE, "wxl-m2", __VA_ARGS__)
-#define WLOG_DEBUG(...) ::wxl_m2::g_api->Log(WXL_LOG_DEBUG, "wxl-m2", __VA_ARGS__)
-#define WLOG_INFO(...)  ::wxl_m2::g_api->Log(WXL_LOG_INFO,  "wxl-m2", __VA_ARGS__)
-#define WLOG_WARN(...)  ::wxl_m2::g_api->Log(WXL_LOG_WARN,  "wxl-m2", __VA_ARGS__)
-#define WLOG_ERROR(...) ::wxl_m2::g_api->Log(WXL_LOG_ERROR, "wxl-m2", __VA_ARGS__)
+#define WLOG_TRACE(...) ::wxl_modern_m2::g_api->Log(WXL_LOG_TRACE, "wxl-modern-m2", __VA_ARGS__)
+#define WLOG_DEBUG(...) ::wxl_modern_m2::g_api->Log(WXL_LOG_DEBUG, "wxl-modern-m2", __VA_ARGS__)
+#define WLOG_INFO(...)  ::wxl_modern_m2::g_api->Log(WXL_LOG_INFO,  "wxl-modern-m2", __VA_ARGS__)
+#define WLOG_WARN(...)  ::wxl_modern_m2::g_api->Log(WXL_LOG_WARN,  "wxl-modern-m2", __VA_ARGS__)
+#define WLOG_ERROR(...) ::wxl_modern_m2::g_api->Log(WXL_LOG_ERROR, "wxl-modern-m2", __VA_ARGS__)

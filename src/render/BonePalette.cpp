@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-#include "ExtensionApi.hpp"
+#include "../ExtensionApi.hpp"
 #include "ShadowSpace.hpp"
 
 #include "engine/events/Event.hpp"
@@ -56,7 +56,7 @@ namespace
     {
         g_origBuildBonePalette(renderCtx, edx, sa1, sa2, sa3, sa4, sa5);
         ev::BuildBonePaletteArgs a{ renderCtx };
-        wxl_m2::g_api->Emit(uint32_t(ev::Event::OnBuildBonePalette), &a);
+        wxl_modern_m2::g_api->Emit(uint32_t(ev::Event::OnBuildBonePalette), &a);
     }
 
     /**
@@ -112,7 +112,7 @@ namespace
         // This detour is the ONLY one the client's real M2 ground-shadow draw can carry (MinHook
         // rejects a second on the same target), so the shadow bone probe rides it from here rather
         // than installing its own. Observe-only: it never alters the draw.
-        if constexpr (wxl_m2::kEnabled)
+        if constexpr (wxl_modern_m2::kEnabled)
             wxl::runtime::m2shadow::OnShadowBatch(instance, skinSection);
 
         g_origRenderBatchShadowMap(instance, nullptr, batchMode, skinBatch, drawList,
@@ -120,7 +120,7 @@ namespace
     }
 }
 
-namespace wxl_m2
+namespace wxl_modern_m2
 {
     bool InstallM2CompatBones()
     {
