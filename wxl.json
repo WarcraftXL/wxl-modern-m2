@@ -20,12 +20,14 @@
       { "target": "M2.BuildBonePalette" },
       { "target": "M2.PerFrameUpdate" },
       { "target": "M2.DrawBatch" },
+      { "target": "M2.DrawBatchDoodad" },
       { "target": "M2.RibbonDraw" },
       { "target": "M2.RenderBatchShadowMap" },
       { "target": "M2.SortOpaqueGeoBatches" },
       { "target": "M2.SceneTriangleHitTest" },
       { "target": "M2.BufferAlloc" },
-      { "target": "M2.BufferFree" }
+      { "target": "M2.BufferFree" },
+      { "target": "Storage.FileOpen" }
     ]
   },
 
@@ -36,7 +38,7 @@
 
   "listing": {
     "title": "Modern M2",
-    "tagline": "Loads models authored for newer versions of the game, natively.",
+    "tagline": "Loads models authored for newer versions of the game, natively, with per-tier LOD skin variants for distant placements.",
     "description": "store/description.md",
     "cover": "store/cover.png",
     "gallery": [

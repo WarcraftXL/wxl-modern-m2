@@ -53,6 +53,7 @@ int __cdecl WXL_Load(const WXL_Api* api)
         wxl_modern_m2::InstallM2CompatLoader();
         wxl_modern_m2::InstallM2Native();
         wxl_modern_m2::InstallModernM2();
+        wxl_modern_m2::InstallM2LodVariant();
     }
 
     api->Log(WXL_LOG_INFO, "wxl-modern-m2", "native M2 reader active");

@@ -36,30 +36,12 @@ namespace
     std::atomic<bool> g_enabled{ true };
 
     std::atomic<uint32_t> g_statDraws{ 0 };
-    std::atomic<uint32_t> g_statPairs{ 0 };
     std::atomic<uint32_t> g_statInflZero{ 0 };
     std::atomic<uint32_t> g_statInflFixed{ 0 };
     std::atomic<uint32_t> g_statOverride{ 0 };
     std::atomic<uint32_t> g_statStaleAnim{ 0 };
     std::atomic<uint32_t> g_statPaletteMismatch{ 0 };
     std::atomic<uint32_t> g_statFaults{ 0 };
-
-    /// Distinct (model, section) PAIRS to dump. Per-model dedup was the flaw in the previous pass: a
-    /// tree has several sections and only some carry boneInfluences == 0, so logging whichever section
-    /// happened to draw first reported "no zero-influence sections" while hiding exactly the case
-    /// under investigation.
-    constexpr uint32_t kMaxPairsLogged = 192;
-
-    struct Pair { void* shared; const void* section; };
-    Pair     g_logged[kMaxPairsLogged]{};
-    uint32_t g_loggedCount = 0;
-
-    bool AlreadyLogged(void* shared, const void* section)
-    {
-        for (uint32_t i = 0; i < g_loggedCount; ++i)
-            if (g_logged[i].shared == shared && g_logged[i].section == section) return true;
-        return false;
-    }
 
     void ProbeShadowDraw(void* instance, void* section)
     {
@@ -71,7 +53,6 @@ namespace
 
         // --- the value that actually selects the shadow vertex program ---
         const uint16_t inflDraw = sec->boneInfluences;
-        const uint16_t gate = *reinterpret_cast<const uint16_t*>(shared + off::kOffSharedAnimGateCount);
         const uint32_t ovr = *reinterpret_cast<const uint32_t*>(
             reinterpret_cast<const uint8_t*>(inst) + off::kOffInstSectionOverride);
 
@@ -108,19 +89,6 @@ namespace
         if (ovr != 0)             g_statOverride.fetch_add(1, std::memory_order_relaxed);
         if (lastAnim != frame)    g_statStaleAnim.fetch_add(1, std::memory_order_relaxed);
         if (!palMatchesRoot)      g_statPaletteMismatch.fetch_add(1, std::memory_order_relaxed);
-
-        const bool dump = !AlreadyLogged(shared, section) && g_loggedCount < kMaxPairsLogged;
-        if (dump)
-        {
-            g_logged[g_loggedCount++] = Pair{ shared, section };
-            g_statPairs.fetch_add(1, std::memory_order_relaxed);
-            const char* stem = wxl::game::m2::PathStem(shared);
-            WLOG_INFO("m2shadow-probe: '%s' sec=%d inflDraw=%u inflSkin=%u gate=%u ovr=0x%X "
-                      "anim=%u frame=%u palRoot=%u%s",
-                      stem ? stem : "(no stem)", secIdx, inflDraw, inflSkin, gate, ovr,
-                      lastAnim, frame, palMatchesRoot ? 1u : 0u,
-                      inflDraw == 0 ? "  [INFLUENCES=0 -> camera-locked VS]" : "");
-        }
 
         // --- the intervention, folded into the same pass ---
         // A zero here means this draw takes the shadow variant that never applies c14..c16. The section
@@ -173,7 +141,6 @@ namespace wxl::runtime::m2shadow
     {
         Stats s{};
         s.shadowDraws      = g_statDraws.load(std::memory_order_relaxed);
-        s.pairsLogged      = g_statPairs.load(std::memory_order_relaxed);
         s.influencesZero   = g_statInflZero.load(std::memory_order_relaxed);
         s.influencesFixed  = g_statInflFixed.load(std::memory_order_relaxed);
         s.overrideSections = g_statOverride.load(std::memory_order_relaxed);

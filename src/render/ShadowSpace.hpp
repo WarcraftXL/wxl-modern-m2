@@ -44,7 +44,6 @@ namespace wxl::runtime::m2shadow
     struct Stats
     {
         uint32_t shadowDraws;      ///< shadow-map batch draws seen (0 => the hook never fires)
-        uint32_t pairsLogged;      ///< distinct (model, section) pairs dumped to the log
         uint32_t influencesZero;   ///< draws whose section arrived with boneInfluences == 0
         uint32_t influencesFixed;  ///< of those, ones this module lifted to 1 in place
         uint32_t overrideSections; ///< draws whose section came from the model+0x2D0 override arrays
