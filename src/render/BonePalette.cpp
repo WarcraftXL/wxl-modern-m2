@@ -1,5 +1,5 @@
-// M2 bone compatibility: post-fill bone-palette event and an SM3 constant-cache guard for both draw
-// paths (shadow batches and main-draw doodad batches) that can overrun it.
+// M2 bone compatibility: post-fill bone-palette event, and the shadow-batch and main-draw doodad-batch
+// detours the client carries exactly one owner of each for.
 // Copyright (C) 2026 WarcraftXL
 //
 // This program is free software: you can redistribute it and/or modify
@@ -16,8 +16,8 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 #include "../ExtensionApi.hpp"
-#include "BoneOverflowGuard.hpp"
 #include "ShadowSpace.hpp"
+#include "../compat/BoneBudget.hpp"
 
 #include "engine/events/Event.hpp"
 #include "engine/assets/shared/models/m2/M2Format.hpp"
@@ -27,23 +27,21 @@
 
 #include <windows.h>
 
-#include <atomic>
+#include <algorithm>
 #include <cstdint>
-#include <cstring>
 
 namespace
 {
     namespace ev    = wxl::events;
     namespace m2    = wxl::offsets::game::m2;
     namespace gxoff = wxl::offsets::engine::gx;
+    namespace bones = wxl::modern::assets::common::bones;
 
     m2::M2_BuildBonePaletteFn     g_origBuildBonePalette     = nullptr;
     m2::M2_RenderBatchShadowMapFn g_origRenderBatchShadowMap = nullptr;
-    std::atomic<uint32_t>         g_shadowBoneOverflowSkips{ 0 };
 
     using DrawBatchDoodadFn = void (__fastcall*)(void* ctx, void* edx, void* elements, void* indices);
-    DrawBatchDoodadFn      g_origDrawBatchDoodad      = nullptr;
-    std::atomic<uint32_t>  g_doodadBoneOverflowSkips{ 0 };
+    DrawBatchDoodadFn g_origDrawBatchDoodad = nullptr;
 
     /**
      * @brief Detours bone-palette build, emitting OnBuildBonePalette after the engine fills the buffer.
@@ -68,116 +66,16 @@ namespace
     }
 
     /**
-     * @brief Rejects M2 shadow batches whose palette would overrun WoW's VS constant cache, or whose
-     *        skinSection pointer has fallen outside the model's own submesh-copy array.
+     * @brief Detours the M2 ground-shadow batch draw.
      *
-     * The native shadow path begins at c31 and copies three float4 registers per bone. The cache contains
-     * c0..c255, so 75 bones is the largest representable palette FOR A SINGLE INSTANCE -- but the native
-     * copy loop runs once per co-instance the engine batched into this one shadow draw call, writing every
-     * instance's bones back to back into the same never-reset destination, so the real overflow condition
-     * is boneCount * (instances batched into this draw) > 75, not boneCount alone. A model comfortably
-     * under 75 bones on its own still overflows once enough identical placements land in the same shadow
-     * batch (a load-burst wave that coerces a cluster of placements onto the same coarse model being the
-     * case that surfaced this). Letting the native function process an oversized batch overwrites the
-     * adjacent Gx vertex-declaration table with bone-matrix floats and crashes later in GxPrimVertexPtr.
-     *
-     * skinSection itself is not handed in directly: the native batch-list walk
-     * (CM2Model::RenderModelBatchListShadowMap) derives it as
-     * model+kOffModelSubmeshBuf + batch.skinSectionIndex * sizeof(M2SkinSection) -- an index into an
-     * array kFinalizeSkin sizes to the CURRENTLY attached skin's submeshCount. A batch whose
-     * skinSectionIndex the live array no longer covers lands on other still-mapped heap memory, which
-     * SEH does not catch (it only catches genuine access violations, not a pointer that is simply
-     * wrong): the read below would appear to succeed with garbage. Range-checking the pointer against
-     * the model's own submeshCount catches that case before any field of it is trusted.
+     * This detour is the ONLY one the client's real M2 ground-shadow draw can carry (MinHook
+     * rejects a second on the same target), so the shadow bone probe rides it from here rather
+     * than installing its own. Observe-only: it never alters the draw.
      */
     void __fastcall hkRenderBatchShadowMap(
         void* instance, void*, uint32_t batchMode, void* skinBatch, void* drawList,
         uint32_t drawIndex, void* skinSection, void* previousSection)
     {
-        using wxl_modern_m2::kMaxShadowBones;
-        constexpr size_t kSkinSectionStride = 0x30;
-        uint32_t boneCount = 0;
-        __try
-        {
-            bool inRange = false;
-            if (skinSection)
-            {
-                const auto* inst  = static_cast<const m2::M2Instance*>(instance);
-                const auto* model = inst ? reinterpret_cast<const uint8_t*>(inst->model) : nullptr;
-                if (model)
-                {
-                    const auto* skin = *reinterpret_cast<uint8_t* const*>(model + m2::kOffModelSkin);
-                    const auto* runtime = *reinterpret_cast<uint8_t* const*>(model + m2::kOffModelSubmeshBuf);
-                    const uint32_t submeshCount = skin ? *reinterpret_cast<const uint32_t*>(skin + 0x1C) : 0;
-                    const auto* sec = static_cast<const uint8_t*>(skinSection);
-                    inRange = runtime && submeshCount &&
-                              sec >= runtime && sec < runtime + static_cast<size_t>(submeshCount) * kSkinSectionStride;
-                }
-            }
-
-            // boneCount (the submesh's palette size, what the shadow path copies 3 registers per
-            // bone of) -- NOT boneInfluences (max bone weights per VERTEX, always small, ~1-4, and
-            // useless as an overflow signal). A previous version of this guard checked the wrong
-            // field, so it never actually rejected an oversized palette.
-            boneCount = inRange ? static_cast<const wxl::structure::m2::M2SkinSection*>(skinSection)->boneCount
-                                 : kMaxShadowBones + 1;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            boneCount = kMaxShadowBones + 1;
-        }
-
-        // The co-instance count this draw was asked to batch -- the native function itself reads the
-        // identical field, from the identical drawList/drawIndex, before deciding how many co-instances
-        // to actually grant (which can only clamp it lower, never raise it -- so this is always a safe,
-        // conservative upper bound on the real batch size, never an undercount). Any read failure fails
-        // safe by forcing the skip below rather than risking an unguarded batch.
-        uint32_t requestedInstances = 1;
-        __try
-        {
-            if (drawList)
-            {
-                const auto* const* listBase = reinterpret_cast<void* const* const*>(drawList);
-                const auto* runs = reinterpret_cast<const uint32_t*>(*listBase);
-                if (runs)
-                    requestedInstances = runs[drawIndex * 3 + 2];
-            }
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            requestedInstances = kMaxShadowBones + 1;
-        }
-
-        if (wxl_modern_m2::BoneConstantsWouldOverflow(boneCount, requestedInstances))
-        {
-            const uint32_t skipped = ++g_shadowBoneOverflowSkips;
-            if (skipped <= 32 || (skipped % 1000u) == 0)
-            {
-                char path[264] = "<unreadable>";
-                __try
-                {
-                    const auto* inst = static_cast<const m2::M2Instance*>(instance);
-                    const auto* model = inst ? reinterpret_cast<const m2::M2Model*>(inst->model) : nullptr;
-                    if (model)
-                    {
-                        std::strncpy(path, model->pathStem, sizeof(path) - 1);
-                        path[sizeof(path) - 1] = '\0';
-                    }
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER)
-                {
-                    std::strcpy(path, "<unreadable>");
-                }
-                WLOG_WARN("M2 shadow: skipped oversized palette bones=%u instances=%u max=%u draw=%u "
-                          "model='%s' (skips=%u)",
-                          boneCount, requestedInstances, kMaxShadowBones, drawIndex, path, skipped);
-            }
-            return;
-        }
-
-        // This detour is the ONLY one the client's real M2 ground-shadow draw can carry (MinHook
-        // rejects a second on the same target), so the shadow bone probe rides it from here rather
-        // than installing its own. Observe-only: it never alters the draw.
         if constexpr (wxl_modern_m2::kEnabled)
             wxl::runtime::m2shadow::OnShadowBatch(instance, skinSection);
 
@@ -186,40 +84,64 @@ namespace
     }
 
     /**
-     * @brief Same overflow guard as hkRenderBatchShadowMap above, for the main-draw doodad-batch path.
+     * @brief Detours the main-draw batched-doodad path, splitting an over-budget co-instance batch into
+     *        several native calls instead of drawing it as one.
      *
-     * The shadow path is not the only caller that can overrun the VS constant cache this way -- the
-     * main-draw batched-doodad path negotiates a co-instance batch and copies bone palettes into the
-     * exact same c31-based constant range the same unbounded, never-reset way, and nothing guarded it
-     * until now. Since the overrun corrupts a single process-wide table (not anything per-draw-call),
-     * an overflow here can just as easily be what a LATER, otherwise-ordinary shadow or main-draw batch
-     * crashes reading back -- the two guards close both known ways into the same shared corruption.
+     * The native function already loops internally over groups of AllocInstances' granted capacity, but
+     * that capacity is sized for GPU buffer space, not for the c31-based VS-constant budget -- a group
+     * can still ask for more than kMaxBonesPerDraw total bones across its co-instances. The fix mirrors
+     * that same internal loop shape from the outside: shrink the batch record's run-length field
+     * (kM2ElementRunLengthField) to a bone-budget-safe count per call, advance the indices pointer by
+     * what was actually drawn, and restore the field to its original value before returning -- the
+     * caller (CM2SceneRender::Draw) reads that same field a second time, right after this call returns,
+     * to advance its own sorted-index cursor past the whole run.
      */
     void __fastcall hkDrawBatchDoodad(void* ctx, void* edx, void* elements, void* indices)
     {
-        using namespace wxl_modern_m2;
-        uint32_t boneCount = 0, requestedInstances = 1;
+        uint32_t* countField    = nullptr;
+        uint32_t  originalCount = 0;
+        uint32_t  chunkSize     = 0;
         __try
         {
-            const auto* c = static_cast<const gxoff::DrawBatchContext*>(ctx);
-            boneCount = CurrentBatchBoneCount(c);
-            requestedInstances = CurrentBatchRequestedInstances(c);
+            auto* c = static_cast<gxoff::DrawBatchContext*>(ctx);
+            if (c->element)
+            {
+                auto* elementBytes = static_cast<uint8_t*>(c->element);
+                countField    = reinterpret_cast<uint32_t*>(elementBytes + gxoff::kM2ElementRunLengthField);
+                originalCount = *countField;
+
+                const void* section =
+                    *reinterpret_cast<void* const*>(elementBytes + gxoff::kM2ElementSectionField);
+                const uint32_t boneCount = section
+                    ? static_cast<const wxl::structure::m2::M2SkinSection*>(section)->boneCount
+                    : 0;
+
+                chunkSize = boneCount > 0
+                    ? std::max<uint32_t>(1u, bones::kMaxBonesPerDraw / boneCount)
+                    : originalCount;
+            }
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
-            boneCount = kMaxShadowBones + 1;
+            countField = nullptr; // fail safe: single native call below, batch record left untouched
         }
 
-        if (BoneConstantsWouldOverflow(boneCount, requestedInstances))
+        if (!countField || chunkSize >= originalCount)
         {
-            const uint32_t skipped = ++g_doodadBoneOverflowSkips;
-            if (skipped <= 32 || (skipped % 1000u) == 0)
-                WLOG_WARN("M2 doodad-batch: skipped oversized palette bones=%u instances=%u max=%u (skips=%u)",
-                          boneCount, requestedInstances, kMaxShadowBones, skipped);
+            g_origDrawBatchDoodad(ctx, edx, elements, indices);
             return;
         }
 
-        g_origDrawBatchDoodad(ctx, edx, elements, indices);
+        auto*    indexBytes = static_cast<uint8_t*>(indices);
+        uint32_t drawn       = 0;
+        while (drawn < originalCount)
+        {
+            const uint32_t thisChunk = std::min(chunkSize, originalCount - drawn);
+            *countField = thisChunk;
+            g_origDrawBatchDoodad(ctx, edx, elements, indexBytes + static_cast<size_t>(drawn) * 4);
+            drawn += thisChunk;
+        }
+        *countField = originalCount;
     }
 }
 

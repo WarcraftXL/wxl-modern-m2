@@ -23,7 +23,6 @@
 // for its own three slots, so a device recreate (not a Reset -- the vtable survives that) is covered.
 
 #include "../ExtensionApi.hpp"
-#include "BoneOverflowGuard.hpp"
 
 #include "common/Mem.hpp"
 #include "engine/events/Event.hpp"
@@ -34,8 +33,6 @@
 
 #include <windows.h>
 #include <d3d9.h>
-
-#include <atomic>
 
 namespace
 {
@@ -53,7 +50,6 @@ namespace
 
     using DrawBatchFn = void (__fastcall*)(void* ctx, void* edx);
     DrawBatchFn g_origDrawBatch = nullptr;
-    std::atomic<uint32_t> g_batchBoneOverflowSkips{ 0 };
 
     // Ribbon multi-texture: set true around a >= 3 layer ribbon's single native pass so the DIP override
     // folds its bound layers into one combine. The native ribbon draw is hooked separately below.
@@ -68,44 +64,12 @@ namespace
     void EnsureDIPHook(IDirect3DDevice9* dev);   // defined after the detours
 
     /**
-     * @brief Detours the M2 batch draw, recording the drawing model so the per-draw event can name it,
-     *        and rejects a batch whose single skin section would alone overrun the VS constant cache.
+     * @brief Detours the M2 batch draw, recording the drawing model so the per-draw event can name it.
      * @param ctx  draw context carrying the model field.
      * @param edx  unused register slot for the thiscall convention.
-     *
-     * This is the third of three sites that copy a skin section's bone palette into shared VS constant
-     * registers starting at c31 (the other two -- the shadow path and the doodad-batch path, both
-     * co-instance-batched via CM2Shared::AllocInstances -- are guarded in BonePalette.cpp). Unlike
-     * those, this plain draw path never batches co-instances: it copies exactly one skin section's own
-     * boneCount bones, unconditionally, with no upper-bound check of its own, so a single retail-
-     * authored section with more than 75 bones overruns the cache standalone -- no burst load, no
-     * co-instance clustering required. Same hardware budget (256 registers, 3 per bone from c31) as the
-     * other two guards; skipped here because MinHook allows only one detour per target and this
-     * function already owns this one.
      */
     void __fastcall hkDrawBatch(void* ctx, void* edx)
     {
-        using namespace wxl_modern_m2;
-        __try
-        {
-            const auto* c = static_cast<const off::DrawBatchContext*>(ctx);
-            const bool shadersOn = *reinterpret_cast<const uint32_t*>(
-                reinterpret_cast<const uint8_t*>(m2off::kEnableShaders)) != 0;
-            if (shadersOn)
-            {
-                const uint32_t boneCount = CurrentBatchBoneCount(c);
-                if (BoneConstantsWouldOverflow(boneCount, 1)) // this site never batches co-instances
-                {
-                    const uint32_t skipped = ++g_batchBoneOverflowSkips;
-                    if (skipped <= 32 || (skipped % 1000u) == 0)
-                        WLOG_WARN("M2 draw-batch: skipped oversized palette bones=%u max=%u (skips=%u)",
-                                  boneCount, kMaxShadowBones, skipped);
-                    return;
-                }
-            }
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER) { /* ctx is always freshly valid here; fail through to native */ }
-
         void* prevModel = g_curModel;
         void* prevCtx   = g_curDrawCtx;
         g_curModel = static_cast<off::DrawBatchContext*>(ctx)->model;
