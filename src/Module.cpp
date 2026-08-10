@@ -49,6 +49,7 @@ int __cdecl WXL_Load(const WXL_Api* api)
         wxl_modern_m2::InstallM2PerFrameUpdate();
         wxl_modern_m2::InstallM2SceneHitTestSort();
         wxl_modern_m2::InstallM2SetupBatchAlpha();
+        wxl_modern_m2::InstallCombinerPatch();
         wxl_modern_m2::InstallAnimUnwrap();
         wxl_modern_m2::InstallM2CompatLoader();
         wxl_modern_m2::InstallM2Native();

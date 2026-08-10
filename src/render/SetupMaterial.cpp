@@ -15,6 +15,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 #include "../ExtensionApi.hpp"
+#include "CombinerPatch.hpp"
 
 #include "engine/events/Event.hpp"
 
@@ -28,6 +29,7 @@ namespace
 {
     namespace ev = wxl::events;
     namespace m2 = wxl::offsets::game::m2;
+    namespace combiner = wxl::runtime::m2combiner;
 
     m2::M2_SetupBatchAlphaFn g_origSetupAlpha = nullptr;
 
@@ -36,7 +38,11 @@ namespace
      *
      * Runs after the native setter picks the alpha-test reference from the blend mode, so a
      * subscriber can re-push a different reference. The draw-context reads are guarded so a
-     * malformed context never faults the render thread.
+     * malformed context never faults the render thread. Also arms CombinerPatch.cpp's own shader
+     * substitution when the about-to-draw element is one a skin-finalize pass tagged for it -- this
+     * is the only point in the per-batch draw sequence that already resolves both the live skin
+     * profile (via the instance's model) and the element's own batch index, so tagging happens here
+     * once instead of duplicating the model/skin walk in a second hook closer to the actual bind.
      * @param ctx  draw context.
      */
     void __fastcall hkSetupBatchAlpha(void* ctx)
@@ -52,6 +58,16 @@ namespace
             void* mat  = dc->material;
             if (inst) model = reinterpret_cast<void*>(static_cast<m2::M2Instance*>(inst)->model);
             if (mat)  blend = static_cast<m2::Material*>(mat)->blend;
+
+            void* elem = dc->element;
+            if (model && elem)
+            {
+                void* skin = static_cast<m2::M2Model*>(model)->skin;
+                const uint32_t batchIndex =
+                    *reinterpret_cast<const uint32_t*>(static_cast<uint8_t*>(elem) + m2::kOffElementBatchIndex);
+                if (skin && combiner::IsAddAlphaBatch(skin, batchIndex))
+                    combiner::ArmNextBind();
+            }
         }
         __except (EXCEPTION_EXECUTE_HANDLER) { model = nullptr; }
 

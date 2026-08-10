@@ -100,6 +100,7 @@ namespace wxl_modern_m2
     bool InstallM2SceneHitTestSort();  // HitTestSort.cpp (gated)
     bool InstallM2Draw();              // M2Draw.cpp (unconditional -- owns the DIP vtable slot)
     bool InstallM2SetupBatchAlpha();   // SetupMaterial.cpp (gated)
+    bool InstallCombinerPatch();       // render/CombinerPatch.cpp (gated)
     bool InstallAnimUnwrap();          // AnimUnwrap.cpp (gated)
     bool InstallM2CompatLoader();      // CompatLoader.cpp (gated)
     bool InstallM2Native();            // NativeLoad.cpp (gated)

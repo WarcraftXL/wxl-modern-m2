@@ -17,6 +17,7 @@
 #include "Skin.hpp"
 
 #include "../ExtensionApi.hpp"
+#include "../render/CombinerPatch.hpp"
 
 #include <cstdlib>
 #include <cstring>
@@ -24,8 +25,9 @@
 
 namespace wxl::modern::assets::m2::skin
 {
-    namespace fmt = wxl::structure::m2;
-    namespace bn  = wxl::modern::assets::common::bones;
+    namespace fmt      = wxl::structure::m2;
+    namespace bn       = wxl::modern::assets::common::bones;
+    namespace combiner = wxl::runtime::m2combiner;
     using Skin     = wxl::game::m2::M2SkinProfile;
 
     namespace
@@ -257,10 +259,15 @@ namespace wxl::modern::assets::m2::skin
          * @param piece               Receives the reshaped batch(es).
          * @param texUnitLookup       textureUnitLookup array to append into.
          * @param blendOverride       textureCombinerCombos array to append into.
+         * @param outIsAddAlpha       Set true when the source batch was the additive-overlay combiner
+         *                            (source effect index 21) render/CombinerPatch.cpp substitutes at
+         *                            draw time; left untouched otherwise, so the caller should start it
+         *                            at false.
          */
         void DownConvertBatch(fmt::M2Batch b, uint32_t nTransparencyLookup, uint32_t nTransformLookup,
                               std::vector<fmt::M2Batch>& piece,
-                              std::vector<int16_t>& texUnitLookup, std::vector<uint16_t>& blendOverride)
+                              std::vector<int16_t>& texUnitLookup, std::vector<uint16_t>& blendOverride,
+                              bool& outIsAddAlpha)
         {
             uint16_t shaderId = b.shaderId;
             uint16_t textureCount = b.textureCount;
@@ -290,8 +297,8 @@ namespace wxl::modern::assets::m2::skin
                 {
                 case 5: case 8: case 10: case 12: case 16: case 23:
                     shaderId = 0; textureCount = 1; break;
-                case 21:
-                    shaderId = 0x4011; textureCount = 2; break;
+                case 21: case 33: case 35:
+                    shaderId = 0x4011; textureCount = 2; outIsAddAlpha = true; break;
                 default:
                     shaderId = 0x0010; textureCount = 1; break;
                 }
@@ -333,7 +340,9 @@ namespace wxl::modern::assets::m2::skin
                 if (b.skinSectionIndex < splitMap.size()) run = splitMap[b.skinSectionIndex];
 
                 std::vector<fmt::M2Batch> piece;
-                DownConvertBatch(b, nTransparencyLookup, nTransformLookup, piece, texUnitLookup, blendOverride);
+                bool isAddAlpha = false;
+                DownConvertBatch(b, nTransparencyLookup, nTransformLookup, piece, texUnitLookup, blendOverride,
+                                 isAddAlpha);
 
                 for (uint16_t s = 0; s < run.count; ++s)
                 {
@@ -345,6 +354,8 @@ namespace wxl::modern::assets::m2::skin
                         nb.skinSectionIndex = sectionIdx;
                         if (bad) nb.shaderId = 0x8000;
                         out.push_back(nb);
+                        if (isAddAlpha && !bad)
+                            combiner::MarkAddAlphaBatch(skin, static_cast<uint32_t>(out.size() - 1));
                     }
                 }
             }
