@@ -70,14 +70,15 @@ namespace wxl::modern::assets::m2
         void __cdecl OnSkinFinalize(void* /*user*/, const void* argsRaw)
         {
             const auto& a = *static_cast<const ev::M2SkinFinalizeArgs*>(argsRaw);
-            auto* md = m2::Header(a.model);
-            auto* sk = m2::Skin(a.model);
+            m2::M2Model model(a.model);
+            auto* md = model.GetHeader();
+            auto* sk = model.GetSkin();
             if (!md || !sk) return;
 
             std::vector<bn::SplitSection> sections;
             std::vector<bn::SplitRun> splitMap;
             uint32_t splitCount = 0;
-            const char* pathStem = m2::PathStem(a.model);
+            const char* pathStem = model.GetPathStem();
             const bool split = bn::SplitSubmeshes(md, sk, sections, splitMap, splitCount,
                                                   pathStem ? pathStem : "") && splitCount > 0;
             if (split)

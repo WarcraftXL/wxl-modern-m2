@@ -123,7 +123,7 @@ namespace
         // bookkeeping stay valid -- and +0x150 now IS the header.
         if (s.bodyOff != 0)
             std::memmove(buf, buf + s.bodyOff, s.bodySize);
-        wxl::game::m2::ReplaceBuffer(model, buf, s.bodySize);
+        wxl::game::m2::M2Model(model).SetBuffer(buf, s.bodySize);
         h = reinterpret_cast<fmt::M2Header*>(buf);
 
         // --- in-place field deltas on the raw body ---
@@ -271,7 +271,7 @@ namespace wxl::runtime::m2native
         NativeLoadGuarded(model, &out);
         if (out.ok == 2) return 1; // already-loaded re-entry: no stats, no event
 
-        const char* stem = wxl::game::m2::PathStem(model);
+        const char* stem = wxl::game::m2::M2Model(model).GetPathStem();
         if (!stem) stem = "(no stem)";
 
         if (!out.ok)

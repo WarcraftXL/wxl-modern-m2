@@ -100,7 +100,7 @@ namespace
             const uint32_t n = g_statInflFixed.fetch_add(1, std::memory_order_relaxed) + 1;
             if (n <= 8)
             {
-                const char* stem = wxl::game::m2::PathStem(shared);
+                const char* stem = wxl::game::m2::M2Model(shared).GetPathStem();
                 WLOG_WARN("m2shadow: lifted boneInfluences 0 -> 1 at the shadow draw for '%s' sec=%d "
                           "(inflSkin=%u ovr=0x%X) -- this section would have been camera-locked",
                           stem ? stem : "(no stem)", secIdx, inflSkin, ovr);

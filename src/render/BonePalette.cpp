@@ -66,11 +66,25 @@ namespace
     }
 
     /**
-     * @brief Detours the M2 ground-shadow batch draw.
+     * @brief Detours the M2 ground-shadow batch draw, splitting an over-budget co-instance run into
+     *        several native calls instead of drawing it as one.
      *
      * This detour is the ONLY one the client's real M2 ground-shadow draw can carry (MinHook
-     * rejects a second on the same target), so the shadow bone probe rides it from here rather
-     * than installing its own. Observe-only: it never alters the draw.
+     * rejects a second on the same target), so the shadow bone probe rides it from here too.
+     *
+     * The native function's own bone-copy loop (c31-based, 3 registers/bone) is unbounded across the
+     * whole co-instance run -- boneCount * coInstanceCount can exceed the 75-bone VS-constant budget
+     * even when boneCount alone is small, overflowing past c255 into the device's own vertex-stream
+     * slot cache. That overflow is a confirmed, disasm-verified crash: it corrupts a slot record's
+     * "count" dword with a bone-matrix float, which FUN_006844c0 later reads as an array index and
+     * faults on a wild address (see corpus/re_comprehension/335/m2_instance_0x184_gx_cache.md §14 for
+     * the original trace, and the register-level confirmation recorded in this session's own crash
+     * triage). Mirrors DrawBatchDoodad's fix exactly, using the run-list shape
+     * kShadowRunStride/kShadowRunCountField document: shrink the run's requested-count field to a
+     * bone-budget-safe value per sub-call, advance drawIndex by however many co-instances were
+     * actually drawn, and restore the field to the original total before returning -- the caller
+     * (RenderModelBatchListShadowMap) reads that same field a second time, right after this call
+     * returns, to advance its own run cursor.
      */
     void __fastcall hkRenderBatchShadowMap(
         void* instance, void*, uint32_t batchMode, void* skinBatch, void* drawList,
@@ -79,8 +93,50 @@ namespace
         if constexpr (wxl_modern_m2::kEnabled)
             wxl::runtime::m2shadow::OnShadowBatch(instance, skinSection);
 
-        g_origRenderBatchShadowMap(instance, nullptr, batchMode, skinBatch, drawList,
-                                   drawIndex, skinSection, previousSection);
+        uint32_t* runs          = nullptr;
+        uint32_t  originalCount = 0;
+        uint32_t  chunkSize     = 0;
+        __try
+        {
+            if (drawList && skinSection)
+            {
+                auto* listData = *reinterpret_cast<uint32_t* const*>(drawList);
+                if (listData)
+                {
+                    runs = listData;
+                    originalCount = runs[drawIndex * m2::kShadowRunStride + m2::kShadowRunCountField];
+
+                    const uint32_t boneCount =
+                        static_cast<const wxl::structure::m2::M2SkinSection*>(skinSection)->boneCount;
+                    chunkSize = boneCount > 0
+                        ? std::max<uint32_t>(1u, bones::kMaxBonesPerDraw / boneCount)
+                        : originalCount;
+                }
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            runs = nullptr; // fail safe: single native call below, run list left untouched
+        }
+
+        if (!runs || chunkSize >= originalCount)
+        {
+            g_origRenderBatchShadowMap(instance, nullptr, batchMode, skinBatch, drawList,
+                                       drawIndex, skinSection, previousSection);
+            return;
+        }
+
+        uint32_t drawn = 0;
+        while (drawn < originalCount)
+        {
+            const uint32_t thisChunk = std::min(chunkSize, originalCount - drawn);
+            const uint32_t thisIndex = drawIndex + drawn;
+            runs[thisIndex * m2::kShadowRunStride + m2::kShadowRunCountField] = thisChunk;
+            g_origRenderBatchShadowMap(instance, nullptr, batchMode, skinBatch, drawList,
+                                       thisIndex, skinSection, previousSection);
+            drawn += thisChunk;
+        }
+        runs[drawIndex * m2::kShadowRunStride + m2::kShadowRunCountField] = originalCount;
     }
 
     /**
