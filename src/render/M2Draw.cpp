@@ -23,6 +23,7 @@
 // for its own three slots, so a device recreate (not a Reset -- the vtable survives that) is covered.
 
 #include "../ExtensionApi.hpp"
+#include "BoneOverflowGuard.hpp"
 
 #include "common/Mem.hpp"
 #include "engine/events/Event.hpp"
@@ -34,12 +35,15 @@
 #include <windows.h>
 #include <d3d9.h>
 
+#include <atomic>
+
 namespace
 {
     namespace off   = wxl::offsets::engine::gx;
     namespace ev    = wxl::events;
     namespace m2off = wxl::offsets::game::m2;
     namespace gx    = wxl::game::gx;
+    namespace guard = wxl_modern_m2;
 
     // The model currently drawing, captured between a batch-draw enter and its DrawIndexedPrimitive.
     void* g_curModel = nullptr;
@@ -50,6 +54,7 @@ namespace
 
     using DrawBatchFn = void (__fastcall*)(void* ctx, void* edx);
     DrawBatchFn g_origDrawBatch = nullptr;
+    std::atomic<uint32_t> g_batchBoneOverflowSkips{ 0 };
 
     // Ribbon multi-texture: set true around a >= 3 layer ribbon's single native pass so the DIP override
     // folds its bound layers into one combine. The native ribbon draw is hooked separately below.
@@ -70,6 +75,26 @@ namespace
      */
     void __fastcall hkDrawBatch(void* ctx, void* edx)
     {
+        __try
+        {
+            const bool shadersOn = *reinterpret_cast<const uint32_t*>(
+                reinterpret_cast<const uint8_t*>(m2off::kEnableShaders)) != 0;
+            const uint32_t boneCount =
+                guard::CurrentBatchBoneCount(static_cast<const off::DrawBatchContext*>(ctx));
+            if (shadersOn && guard::BoneConstantsWouldOverflow(boneCount, 1))
+            {
+                const uint32_t skipped = ++g_batchBoneOverflowSkips;
+                if (skipped <= 32 || skipped % 1000u == 0)
+                    WLOG_WARN("M2 draw-batch: skipped oversized palette bones=%u max=%u (skips=%u)",
+                              boneCount, guard::bones::kMaxBonesPerDraw, skipped);
+                return;
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            // Preserve native behavior if an otherwise valid engine context cannot be inspected.
+        }
+
         void* prevModel = g_curModel;
         void* prevCtx   = g_curDrawCtx;
         g_curModel = static_cast<off::DrawBatchContext*>(ctx)->model;
