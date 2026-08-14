@@ -109,7 +109,9 @@ namespace wxl_modern_m2
     bool InstallModernM2();            // ModernM2.cpp (gated)
     bool InstallM2LodVariant();        // load/LodModelVariant.cpp (unconditional -- inert until a
                                         // caller actually requests a synthetic per-tier name)
-    bool InstallExtendedAnimations();  // client/Animation/AnimationResolver.cpp (optional)
+    bool InstallExtendedAnimations();  // client/Animation/AnimationResolver.cpp (unconditional --
+                                        // a comparison and a jump on every id the engine already
+                                        // handles)
 
     inline bool ConfigTruthy(const char* raw, bool fallback) { return wxl::ext::config::Truthy(raw, fallback); }
 

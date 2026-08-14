@@ -6,10 +6,8 @@
     "version": "1.1.0",
     "abi": "1.1",
     "entry": "wxl-modern-m2.dll",
-    "assets": ["wxl-modern-m2.cfg"],
-    "requires": {
-      "wxl-db2": ">=1.0.0"
-    },
+    "assets": [],
+    "requires": {},
     "conflicts": [],
 
     "hooks": [
@@ -38,7 +36,7 @@
 
   "deploy": {
     "mode": "release",
-    "match": "wxl-modern-m2-v*.zip"
+    "match": "*.dll"
   },
 
   "listing": {

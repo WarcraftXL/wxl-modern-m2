@@ -54,13 +54,8 @@ int __cdecl WXL_Load(const WXL_Api* api)
         wxl_modern_m2::InstallM2CompatLoader();
         wxl_modern_m2::InstallM2Native();
         wxl_modern_m2::InstallModernM2();
-        if (wxl_modern_m2::ConfigFlag("WXL_M2_EXTENDED_ANIMATIONS", nullptr))
-        {
-            if (!wxl_modern_m2::InstallExtendedAnimations())
-                api->Log(WXL_LOG_WARN, "wxl-modern-m2", "extended animation resolver unavailable");
-        }
-        else
-            api->Log(WXL_LOG_INFO, "wxl-modern-m2", "extended animation resolver disabled");
+        if (!wxl_modern_m2::InstallExtendedAnimations())
+            api->Log(WXL_LOG_WARN, "wxl-modern-m2", "extended animation resolver unavailable");
         wxl_modern_m2::InstallM2LodVariant();
     }
 
