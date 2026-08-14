@@ -38,7 +38,7 @@ jobs:
         run: |
           $dest = "core/extensions/$env:EXT_NAME"
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
-          Copy-Item -Path "ext/src","ext/shared.cmake","ext/$env:EXT_NAME.cfg" -Destination $dest -Recurse -Force
+          Copy-Item -Path "ext/*" -Destination $dest -Recurse -Force
 
       - name: Configure (Win32)
         shell: pwsh
@@ -48,24 +48,24 @@ jobs:
         shell: pwsh
         run: cmake --build core/build --config Release --target $env:EXT_NAME --parallel
 
-      - name: Read version and stage Hub package
-        id: version
+      - name: Stage the DLL
         shell: pwsh
         run: |
-          $version = (Get-Content ext/wxl.json -Raw | ConvertFrom-Json).extension.version
-          if (-not $version) { throw "wxl.json carries no extension.version" }
-          $package = "dist/package"
-          New-Item -ItemType Directory -Force -Path $package | Out-Null
-          Copy-Item "core/build/Release/$env:EXT_NAME.dll" "$package/$env:EXT_NAME.dll"
-          Copy-Item "ext/$env:EXT_NAME.cfg" "$package/$env:EXT_NAME.cfg"
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Compress-Archive -Path "$package/*" -DestinationPath "dist/$env:EXT_NAME-v$version.zip" -Force
-          "version=$version" >> $env:GITHUB_OUTPUT
+          Copy-Item "core/build/Release/$env:EXT_NAME.dll" -Destination "dist/$env:EXT_NAME.dll"
+
+      - name: Read the version out of the manifest
+        id: v
+        shell: pwsh
+        run: |
+          $v = (Get-Content ext/wxl.json -Raw | ConvertFrom-Json).extension.version
+          if (-not $v) { throw "wxl.json carries no extension.version" }
+          "version=$v" >> $env:GITHUB_OUTPUT
 
       - name: Publish Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: ${{ env.EXT_NAME }} ${{ steps.version.outputs.version }}
-          body: WarcraftXL Hub package built from ${{ github.sha }}.
-          files: dist/${{ env.EXT_NAME }}-v${{ steps.version.outputs.version }}.zip
+          tag_name: v${{ steps.v.outputs.version }}
+          name: ${{ env.EXT_NAME }} ${{ steps.v.outputs.version }}
+          body: Built from ${{ github.sha }}
+          files: dist/${{ env.EXT_NAME }}.dll

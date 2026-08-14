@@ -26,26 +26,22 @@ what's intentionally out of scope for now, and the safety/interface contract).
   pass down a path that never refreshes the pose.
 - **Effect and hit-test fixes**: particle/ribbon blending and triangle hit-testing corrected so effects
   render as intended and clicking selects the right thing.
-- **Extended animation service**: resolves modern animation IDs against each model's available
-  sequences, follows AnimationData fallbacks, and publishes `wxl.m2-animation` for movement modules.
+- **Extended animations**: an animation id past the engine's own ceiling plays when the model carries
+  the sequence, following the table's fallbacks the same way the engine does below it. Publishes
+  `wxl.m2-animation`, the single seam a movement module uses to override what was resolved.
 - **Crash-safe**: malformed input is a logged failure, never a crash.
 
 ## Requirements
 
-WarcraftXL on a 3.3.5a client, build 12340, plus
-[`wxl-db2`](https://github.com/WarcraftXL/wxl-db2) 1.0.0 or newer for FileDataID resolution. The module
-refuses to load against an incompatible client rather than guessing, and says so in the log.
-
-`WXL_M2_EXTENDED_ANIMATIONS=1` in `wxl-modern-m2.cfg` enables the extended animation resolver and its
-public service. It is enabled by default and can be disabled independently without disabling the
-modern model loader.
+WarcraftXL on a 3.3.5a client, build 12340. The module refuses to load against anything else rather than
+guessing, and says so in the log.
 
 ## Building
 
 This extension builds against [wxl-core](https://github.com/WarcraftXL/wxl-core) (branch `v1.1`), which
 auto-discovers any folder dropped into its `extensions/` directory, so there's no project file of its own
 needed here. See `.github/workflows/release.yml` for the exact steps; every push to `main` builds
-the flat `wxl-modern-m2.dll` + `wxl-modern-m2.cfg` Hub package and publishes it as a release.
+`wxl-modern-m2.dll` and publishes it as a release.
 
 ## License
 
