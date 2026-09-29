@@ -21,6 +21,7 @@
 
 #include "engine/events/Event.hpp"
 #include "engine/assets/shared/models/m2/M2Format.hpp"
+#include "game/M2.hpp"
 
 #include "offsets/engine/Gx.hpp"
 #include "offsets/game/M2.hpp"
@@ -42,6 +43,203 @@ namespace
 
     using DrawBatchDoodadFn = void (__fastcall*)(void* ctx, void* edx, void* elements, void* indices);
     DrawBatchDoodadFn g_origDrawBatchDoodad = nullptr;
+
+    // The pair of native functions that own the shared ground-shadow index buffer
+    // (model+0x178/0x17C) and vertex buffer (model+0x180/0x184) respectively -- see
+    // orchestration/docs/r&d/m2-shadow-coinstance-rendering.md. kRenderBatchShadowMap normally calls
+    // both itself, but ONLY when the co-instance count requested for that specific native call is
+    // > 1 (a confirmed disassembly finding, "Gate A") -- for a call requesting exactly 1
+    // co-instance, NEITHER function runs, so the device's currently bound index/vertex buffer is
+    // never (re)confirmed for this model at all; it just keeps drawing from whatever buffer some
+    // unrelated prior draw left bound. This is the leading, disassembly-confirmed explanation for
+    // the shadow-merge corruption: splitting a run into several native calls (this module's own fix
+    // for a real bone-budget overflow crash) can produce calls requesting exactly 1 co-instance each
+    // (guaranteed for any model whose chunkSize computes to 1, e.g. felhound), which never gets its
+    // own buffer bound at all.
+    //
+    // CALLING CONVENTIONS, disassembly-confirmed against ALL real native call sites (2026-09-29,
+    // after an earlier version of this fix -- calling sub_8360a0 correctly but sub_8362b0 with a
+    // MISSING second argument -- caused a real, reproducible client crash: sub_8362b0 ends in
+    // `ret 4`, popping a stack argument that was never pushed, corrupting the caller's frame on
+    // every single call):
+    //   sub_8360a0: thiscall(model)          -- genuinely zero stack args, confirmed at all 5 sites.
+    //   sub_8362b0: thiscall(model, int flag) -- ONE stack arg, `ret 4`; 4 of 6 real call sites push
+    //               literal 0, so 0 is used here too.
+    using ShadowIndexBufferRebuildFn  = void (__thiscall*)(void* model);
+    using ShadowVertexBufferRebuildFn = void (__thiscall*)(void* model, int flag);
+    constexpr uintptr_t kShadowIndexBufferRebuild  = 0x8360A0; // sub_8360a0
+    constexpr uintptr_t kShadowVertexBufferRebuild = 0x8362B0; // sub_8362b0
+
+    /**
+     * @brief Forces the shared ground-shadow index/vertex buffers to be (re)bound for this
+     *        instance's model, working around the native "skip binding when this call's own
+     *        requested co-instance count is <= 1" gate (see the comment above). Calling these
+     *        directly, unconditionally, before every split sub-call is intended to be safe: both
+     *        functions already do their own "already valid, nothing to do" checks internally (the
+     *        cache-valid flag bytes / null-buffer checks documented in the R&D doc) -- so calling
+     *        them when the native code would ALSO have called them (requestedCount > 1) is simply
+     *        redundant, and calling them when it would NOT have (requestedCount <= 1) is the actual
+     *        fix. NOT YET FULLY VERIFIED: calling these before the native function's own
+     *        `AllocInstances` call (for THIS specific request) could still tag internal per-section
+     *        offset state (`model+0x18C`, found this session, not yet in the R&D doc) against a
+     *        stale/zero `model+0x190` for a model whose co-instance pool has never been grown before
+     *        -- test cautiously, watch for silent visual wrongness even if this no longer crashes.
+     */
+    void ForceShadowBufferBind(void* instance)
+    {
+        __try
+        {
+            auto* inst = static_cast<m2::M2Instance*>(instance);
+            if (!inst || !inst->model) return;
+            auto* model = reinterpret_cast<void*>(inst->model);
+            reinterpret_cast<ShadowIndexBufferRebuildFn>(kShadowIndexBufferRebuild)(model);
+            reinterpret_cast<ShadowVertexBufferRebuildFn>(kShadowVertexBufferRebuild)(model, 0);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {}
+    }
+
+    // --- crash fix: bad device vertex stream on the shadow draw -------------------------------------
+    // Restored (2026-09-29) from this session's earlier, separate crash-fix work (a real,
+    // independently-confirmed native crash -- kGxDeviceDraw's `baseVertex = stream.offset /
+    // stream.stride`, hardware divide-by-zero when a stale device vertex stream's stride is 0 --
+    // unrelated to the shadow-merge corruption fixed above; both bugs happened to live in the same
+    // function). Unchanged from its working, tested form.
+
+    /// Why BadBaseVertexGuard flagged a draw -- distinguishes the hard-crash case, the previously
+    /// already-caught out-of-bounds case, and the newly-added in-bounds-but-still-wrong case, purely
+    /// for logging; the mitigation (force zero-base-vertex) is the same for all three.
+    enum class BaseVertexFault { kNone, kZeroStride, kNonzeroOutOfBounds, kNonzeroInBounds };
+
+    /// Raw numbers behind a BadBaseVertexGuard verdict, carried out purely for diagnostic logging --
+    /// enough to tell a stale/wrong-skin cached vertex count apart from any other kind of corruption.
+    struct BaseVertexDiag
+    {
+        BaseVertexFault fault          = BaseVertexFault::kNone;
+        uint32_t        stride         = 0;
+        uint32_t        offset         = 0;
+        uint32_t        derivedBase    = 0;
+        uint32_t        skinVertexCount = 0;
+        uint32_t        coInstances    = 0;
+        uint64_t        ownCapacity    = 0;
+    };
+
+    /**
+     * @brief Peeks at the device's currently-bound vertex stream and reports whether the native draw
+     *        this shadow batch is about to make would compute a bad base vertex (kGxDeviceDraw,
+     *        0x006A3620: `baseVertex = stream.offset / stream.stride`, taken only when
+     *        kGxDeviceBaseVertexMode is 0 -- see offsets/engine/Gx.hpp). For this draw type, base
+     *        vertex 0 is the only correct value -- flags ANY nonzero derived value, not just
+     *        out-of-bounds ones. This is device-global state, not anything specific to the model
+     *        about to draw -- something earlier in the frame left a bad stream bound.
+     * @param instance  the model instance about to draw (for the sanity-bound diagnostics).
+     * @param outDiag   filled with the raw numbers behind the verdict, for logging.
+     * @return the field's address (write 1 to it to force the safe zero-base-vertex path for one
+     *         call, then restore) when the draw is unsafe; nullptr when it's fine or unreadable.
+     */
+    uint32_t* BadBaseVertexGuard(void* instance, BaseVertexDiag& outDiag)
+    {
+        __try
+        {
+            void* devPtr = *reinterpret_cast<void* const*>(gxoff::kGxDevicePtr);
+            if (!devPtr) return nullptr;
+            auto* dev = static_cast<uint8_t*>(devPtr);
+            auto* modeField = reinterpret_cast<uint32_t*>(dev + gxoff::kGxDeviceBaseVertexMode);
+            if (*modeField != 0) return nullptr; // already takes the safe zero-base-vertex path
+
+            auto* stream = *reinterpret_cast<uint8_t* const*>(dev + gxoff::kGxDeviceVertexStream);
+            if (!stream) return nullptr;
+            const uint32_t stride = *reinterpret_cast<const uint32_t*>(stream + gxoff::kGxBufStreamStride);
+            outDiag.stride = stride;
+            if (stride == 0) { outDiag.fault = BaseVertexFault::kZeroStride; return modeField; }
+
+            const uint32_t offset = *reinterpret_cast<const uint32_t*>(stream + gxoff::kGxBufStreamOffset);
+            const uint32_t derivedBaseVertex = offset / stride;
+            outDiag.offset      = offset;
+            outDiag.derivedBase = derivedBaseVertex;
+
+            if (derivedBaseVertex == 0) return nullptr; // the one legitimate value for this draw type
+
+            __try
+            {
+                auto* inst = static_cast<m2::M2Instance*>(instance);
+                if (inst && inst->model)
+                {
+                    auto* mdl = reinterpret_cast<m2::M2Model*>(inst->model);
+                    auto* skin = static_cast<wxl::game::m2::M2SkinProfile*>(mdl->skin);
+                    if (skin && skin->vertexCount)
+                    {
+                        const uint32_t coInstances = *reinterpret_cast<const uint32_t*>(
+                            reinterpret_cast<uint8_t*>(inst->model) + m2::kOffSharedCoInstanceCount);
+                        outDiag.skinVertexCount = skin->vertexCount;
+                        outDiag.coInstances     = coInstances;
+                        outDiag.ownCapacity     = static_cast<uint64_t>(skin->vertexCount) *
+                                                   std::max<uint32_t>(coInstances, 1);
+                    }
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+            outDiag.fault = (outDiag.ownCapacity && derivedBaseVertex >= outDiag.ownCapacity)
+                ? BaseVertexFault::kNonzeroOutOfBounds
+                : BaseVertexFault::kNonzeroInBounds;
+            return modeField;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return nullptr; }
+    }
+
+    /**
+     * @brief Calls the native ground-shadow draw, guarded against the bad-base-vertex crash above.
+     *        Logs the model, run index and the raw diagnostic numbers the first several hundred
+     *        times it fires per session.
+     */
+    void CallShadowMapGuarded(void* instance, uint32_t batchMode, void* skinBatch, void* drawList,
+                              uint32_t runIndex, void* skinSection, void* previousSection)
+    {
+        BaseVertexDiag diag;
+        uint32_t* modeField = BadBaseVertexGuard(instance, diag);
+        if (modeField)
+        {
+            static unsigned logged = 0;
+            if (logged < 500)
+            {
+                ++logged;
+                const char* stem = "(unknown)";
+                __try
+                {
+                    auto* inst = static_cast<m2::M2Instance*>(instance);
+                    if (inst && inst->model)
+                        stem = wxl::game::m2::M2Model(reinterpret_cast<void*>(inst->model)).GetPathStem();
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER) {}
+                const char* faultName =
+                    diag.fault == BaseVertexFault::kZeroStride         ? "zero stride" :
+                    diag.fault == BaseVertexFault::kNonzeroOutOfBounds ? "out-of-bounds base vertex" :
+                                                                          "in-bounds but nonzero base vertex";
+                WLOG_WARN("m2shadow: bad device vertex stream (%s) at shadow draw for '%s' run=%u -- "
+                          "stride=%u offset=%u derivedBase=%u skinVertexCount=%u coInstances=%u "
+                          "ownCapacity=%llu -- forcing zero-base-vertex path to avoid crashing",
+                          faultName, stem ? stem : "(unreadable)", runIndex,
+                          diag.stride, diag.offset, diag.derivedBase, diag.skinVertexCount,
+                          diag.coInstances, static_cast<unsigned long long>(diag.ownCapacity));
+            }
+
+            *modeField = 1;
+            __try
+            {
+                g_origRenderBatchShadowMap(instance, nullptr, batchMode, skinBatch, drawList,
+                                           runIndex, skinSection, previousSection);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                WLOG_WARN("m2shadow: native shadow draw faulted even after mitigation (run=%u) -- "
+                          "swallowed, this shadow batch is skipped", runIndex);
+            }
+            *modeField = 0;
+            return;
+        }
+        g_origRenderBatchShadowMap(instance, nullptr, batchMode, skinBatch, drawList,
+                                   runIndex, skinSection, previousSection);
+    }
 
     /**
      * @brief Detours bone-palette build, emitting OnBuildBonePalette after the engine fills the buffer.
@@ -121,19 +319,24 @@ namespace
 
         if (!runs || chunkSize >= originalCount)
         {
-            g_origRenderBatchShadowMap(instance, nullptr, batchMode, skinBatch, drawList,
-                                       drawIndex, skinSection, previousSection);
+            CallShadowMapGuarded(instance, batchMode, skinBatch, drawList,
+                                 drawIndex, skinSection, previousSection);
             return;
         }
 
+        // Splitting an over-budget batch into several native calls (below) is what exposes the
+        // buffer-bind gap ForceShadowBufferBind works around -- see its own comment. Combined here
+        // with the (unrelated) bad-base-vertex crash guard via CallShadowMapGuarded, since both bugs
+        // happen to live on the same native call.
         uint32_t drawn = 0;
         while (drawn < originalCount)
         {
             const uint32_t thisChunk = std::min(chunkSize, originalCount - drawn);
             const uint32_t thisIndex = drawIndex + drawn;
             runs[thisIndex * m2::kShadowRunStride + m2::kShadowRunCountField] = thisChunk;
-            g_origRenderBatchShadowMap(instance, nullptr, batchMode, skinBatch, drawList,
-                                       thisIndex, skinSection, previousSection);
+            ForceShadowBufferBind(instance);
+            CallShadowMapGuarded(instance, batchMode, skinBatch, drawList,
+                                 thisIndex, skinSection, previousSection);
             drawn += thisChunk;
         }
         runs[drawIndex * m2::kShadowRunStride + m2::kShadowRunCountField] = originalCount;
