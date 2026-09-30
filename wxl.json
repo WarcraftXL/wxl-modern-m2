@@ -3,11 +3,13 @@
 
   "extension": {
     "id": "wxl-modern-m2",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "abi": "1.1",
     "entry": "wxl-modern-m2.dll",
-    "assets": [],
-    "requires": {},
+    "assets": ["wxl-modern-m2.cfg"],
+    "requires": {
+      "wxl-db2": ">=1.0.0"
+    },
     "conflicts": [],
 
     "hooks": [
@@ -27,13 +29,16 @@
       { "target": "M2.SceneTriangleHitTest" },
       { "target": "M2.BufferAlloc" },
       { "target": "M2.BufferFree" },
+      { "target": "M2.HasPlayableAnimation" },
+      { "target": "M2.FindPlayableAnimation" },
+      { "target": "Unit.ResolveModelAnimation" },
       { "target": "Storage.FileOpen" }
     ]
   },
 
   "deploy": {
     "mode": "release",
-    "match": "*.dll"
+    "match": "wxl-modern-m2-v*.zip"
   },
 
   "listing": {

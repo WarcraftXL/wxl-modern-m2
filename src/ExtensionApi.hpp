@@ -20,6 +20,7 @@
 #include "common/ExtensionConfig.hpp"
 #include "wxl/FdidApi.h"
 #include "wxl/M2ArenaApi.h"
+#include "wxl/M2AnimationApi.h"
 #include "wxl/M2DrawApi.h"
 #include "wxl/PluginApi.h"
 
@@ -108,6 +109,7 @@ namespace wxl_modern_m2
     bool InstallModernM2();            // ModernM2.cpp (gated)
     bool InstallM2LodVariant();        // load/LodModelVariant.cpp (unconditional -- inert until a
                                         // caller actually requests a synthetic per-tier name)
+    bool InstallExtendedAnimations();  // client/Animation/AnimationResolver.cpp (optional)
 
     inline bool ConfigTruthy(const char* raw, bool fallback) { return wxl::ext::config::Truthy(raw, fallback); }
 
