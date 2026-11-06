@@ -46,7 +46,18 @@ namespace wxl_modern_m2
     inline const WXL_FdidApi* Fdid()
     {
         if (!g_fdid)
+        {
+            // The installed wxl-db2 may publish an older FdidApi than the SDK header this module was
+            // compiled against (v1 carries only ResolveTexture/ResolveModel). We call just ResolveTexture,
+            // a v1 member at the same offset, so fall back to v1 instead of leaving every fdid unresolved
+            // and every modern texture solid white. GetInterface matches an exact version, so try each.
             g_fdid = static_cast<const WXL_FdidApi*>(g_api->GetInterface("wxl.fdid", WXL_FDID_API_VERSION));
+            if (!g_fdid)
+                g_fdid = static_cast<const WXL_FdidApi*>(g_api->GetInterface("wxl.fdid", 1));
+            if (!g_fdid)
+                g_api->Log(WXL_LOG_WARN, "wxl-modern-m2",
+                           "fdid: wxl.fdid interface unavailable -- modern texture names stay solid white");
+        }
         return g_fdid;
     }
 

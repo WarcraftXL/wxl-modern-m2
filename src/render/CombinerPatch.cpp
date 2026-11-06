@@ -92,6 +92,13 @@ namespace
         return w;
     }
 
+    // Render-state slots the overlay writes with gx::rs / gx::blend values. These belong to the
+    // device's RENDER-STATE namespace, not to the stat-index dispatch: the value lands in a render-state
+    // slot and is never read back as a table address. A blend-state NUMBER written here instead is what
+    // crashed the client on 2026-10-12 (see the note in offsets/engine/Gx.hpp).
+    constexpr unsigned kStateSrcBlend  = wxl::game::gx::rs::kSrcBlend;
+    constexpr unsigned kStateDestBlend = wxl::game::gx::rs::kDestBlend;
+
     void __cdecl hkEffectBind(uint32_t vtxIdx, uint32_t pixIdx)
     {
         g_origEffectBind(vtxIdx, pixIdx);
@@ -114,6 +121,11 @@ namespace
         auto* set = reinterpret_cast<GxSetFn>(shoff::kGxStateSet);
         set(gxDev, nullptr, shoff::kStateVertexShader, g_vsWrapper);
         set(gxDev, nullptr, shoff::kStatePixelShader,  g_psWrapper);
+
+        // The minted shader pair is ADDITIVE; the native blend state of the batch it replaces is not.
+        // Without this the add-alpha primitive draws with whatever state was left bound.
+        set(gxDev, nullptr, kStateSrcBlend,  reinterpret_cast<void*>(static_cast<uintptr_t>(wxl::game::gx::blend::kOne)));
+        set(gxDev, nullptr, kStateDestBlend, reinterpret_cast<void*>(static_cast<uintptr_t>(wxl::game::gx::blend::kOne)));
     }
 }
 
